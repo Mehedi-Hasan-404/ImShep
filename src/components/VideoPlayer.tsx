@@ -1223,8 +1223,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       {playerState.isLive ? (
                         <span className="px-1.5 py-0.5 bg-red-600 rounded text-xs font-semibold">LIVE</span>
                       ) : (
-                        /* FIX FOR CRASH: Replaced playerV2.duration with playerState.duration */
-                        <>{formatTime(playerState.currentTime)} / {formatTime(playerPlayerState.duration)}</>
+                        /* FIX FOR CRASH: Replaced playerPlayerState.duration with playerState.duration */
+                        <>{formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}</>
                       )}
                     </div>
                   </div>
