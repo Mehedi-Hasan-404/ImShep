@@ -1054,18 +1054,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className={`absolute inset-x-0 top-1/2 -translate-y-1/2 ${sizes.progressBarClass} bg-white bg-opacity-30 rounded-full`}>
                   <div className="absolute top-0 left-0 h-full bg-white bg-opacity-50 rounded-full" style={{ width: isFinite(playerState.duration) && playerState.duration > 0 ? `${(playerState.buffered / playerState.duration) * 100}%` : '0%' }}/>
                   <div className="absolute top-0 left-0 h-full bg-red-500 rounded-full" style={{ width: `${currentTimePercentage}%` }}/>
-                  <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 ${sizes.progressThumbClass} rounded-full bg-red-500 transition-all duration-150 ease-out ${playerState.isSeeking ? 'scale-150' : 'group-hover:scale-150'}`} style={{ left: `${currentTimePercentage}%` }} onMouseDown={handleDragStart} onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart}/>
+                  {/* FIX FOR SEEKBAR JUMP: Removed the 'scale-150' when playerState.isSeeking is true */}
+                  <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 ${sizes.progressThumbClass} rounded-full bg-red-500 transition-all duration-150 ease-out group-hover:scale-150`} style={{ left: `${currentTimePercentage}%` }} onMouseDown={handleDragStart} onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart}/>
                 </div>
               </div>
             </div>
             
-            {/* FIX FOR MOBILE CONTROLS OVERFLOW:
-              - Removed 'px-2.5' from the parent div below.
-              - Added 'pl-2.5' to the left-side control group.
-              - Added 'pr-2.5' to the right-side control group.
-              This applies to the `isMobile` block only.
-            */}
-            <div className={`flex items-center ${sizes.gapClass} flex-nowrap justify-between flex-1 min-h-[40px]`}>
+            <div className={`flex items-center ${sizes.gapClass} flex-nowrap flex-1 min-h-[40px]`}>
               {!isMobile && (
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-wrap`}>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -1077,10 +1072,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />}
                     </button>
                     
-                    {/* FIX FOR DESKTOP VOLUME SLIDER:
-                      - Replaced the long list of Tailwind classes with 'volume-slider-horizontal'.
-                      - Kept 'w-20' and 'flex-shrink-0' for layout.
-                    */}
+                    {/* FIX FOR DESKTOP VOLUME SLIDER */}
                     <input
                       type="range"
                       min="0"
@@ -1168,11 +1160,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
               
               {isMobile && (
-                // MOBILE CONTROLS PARENT: `px-2.5` was removed from here
-                <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-nowrap justify-between`}>
+                // FIX FOR MOBILE CONTROLS OVERFLOW: Parent container
+                <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-nowrap`}>
                   
-                  {/* LEFT GROUP: `pl-2.5` was added here */}
-                  <div className={`flex items-center ${sizes.gapClass} pl-2.5`}>
+                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Left group */}
+                  <div className={`flex items-center ${sizes.gapClass} pl-2.5 flex-shrink-0`}>
                     <button 
                       onClick={(e) => { e.stopPropagation(); toggleMute(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
@@ -1193,8 +1185,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </div>
 
-                  {/* CENTER GROUP */}
-                  <div className={`flex items-center ${sizes.gapClass}`}>
+                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Center group */}
+                  <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 justify-center`}>
                     <button 
                       onClick={(e) => { e.stopPropagation(); seekBackward(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
@@ -1220,8 +1212,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </button>
                   </div>
 
-                  {/* RIGHT GROUP: `pr-2.5` was added here */}
-                  <div className={`flex items-center ${sizes.gapClass} pr-2.5`}>
+                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Right group */}
+                  <div className={`flex items-center ${sizes.gapClass} pr-2.5 flex-shrink-0`}>
                     {document.pictureInPictureEnabled && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); togglePip(); }} 
