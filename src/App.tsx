@@ -67,7 +67,7 @@ const App = () => (
             </RecentsProvider>
           </FavoritesProvider>
         </Router>
-        <Analytics /> {/* <-- Add the component here */}
+        <Analytics /> {/* <-- Add component here */}
       </ThemeProvider>
     </TooltipProvider>
   </QueryClientProvider>
