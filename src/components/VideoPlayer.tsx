@@ -663,12 +663,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     rafRef.current = requestAnimationFrame(updateFn);
   }, []);
   
+  // FIX: REMOVED e.preventDefault() to allow mouseup to fire
   const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation(); e.preventDefault(); const video = videoRef.current; if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now();
+    e.stopPropagation(); const video = videoRef.current; if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
   
   const handleDragMove = useCallback((e: MouseEvent) => {
     if (!dragStartRef.current?.isDragging) return; 
+    e.preventDefault(); // Prevent page scroll while dragging
     throttledUpdate(() => {
       const newTime = calculateNewTime(e.clientX); 
       if (newTime !== null) { 
@@ -696,9 +698,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const newTime = calculateNewTime(e.clientX); if (newTime !== null && videoRef.current) videoRef.current.currentTime = newTime; setPlayerState(prev => ({ ...prev, showControls: true })); lastActivityRef.current = Date.now();
   }, [calculateNewTime]);
   
+  // FIX: REMOVED e.preventDefault() to allow touchend to fire
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.stopPropagation();
-    e.preventDefault();
     const video = videoRef.current;
     if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return;
     wasPlayingBeforeSeekRef.current = !video.paused;
@@ -713,7 +715,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (!touchStartRef.current) return;
     e.stopPropagation();
-    e.preventDefault();
+    e.preventDefault(); // Prevent page scroll while dragging
     throttledUpdate(() => {
       const rect = progressRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -731,7 +733,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     videoRef.current.currentTime = seekTimeRef.current;
     if (wasPlayingBeforeSeekRef.current) videoRef.current.play().catch(console.error);
     touchStartRef.current = null;
-    setPlayerState(prev => ({ ...prev, isPlaying: !videoRef.current?.paused }));
+    setPlayerState(prev => ({ ...prev, isSeeking: false, isPlaying: !videoRef.current?.paused }));
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
   
