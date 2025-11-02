@@ -1,4 +1,4 @@
-// /src/pages/Admin.tsx - With Stream Validation
+// /src/pages/Admin.tsx - Fixed Version
 import { useState, useEffect } from 'react';
 import { Route, Link, useLocation, Switch } from 'wouter';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -890,7 +890,7 @@ const ChannelsManager = () => {
                     <div className="font-medium">{channel.name}</div>
                     <div className="text-sm text-text-secondary flex items-center gap-2">
                       <span>{channel.categoryName}</span>
-                      <span className="text-blue-500">ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Manual</span>
+                      <span className="text-blue-500">• Manual</span>
                     </div>
                   </div>
                 </div>
@@ -1181,7 +1181,7 @@ const AdminDashboard = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-3 p-3 bg-bg-secondary rounded-lg">
-                        <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-sm font-bold">ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“</div>
+                        <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-sm font-bold">✔</div>
                         <div>
                           <div className="font-medium">Ready to Stream</div>
                           <div className="text-sm text-text-secondary">Your IPTV system is ready for users to browse and watch</div>
