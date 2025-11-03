@@ -1,4 +1,4 @@
-// /src/pages/ChannelPlayer.tsx - FIXED VERSION
+// /src/pages/ChannelPlayer.tsx - FINAL FIXED VERSION
 import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -364,7 +364,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
   const isChannelFavorite = isFavorite(channel.id);
 
-  // --- THIS IS THE PROXY LOGIC YOU WERE MISSING ---
+  // --- THIS IS THE PROXY LOGIC ---
   let playerStreamUrl = channel.streamUrl;
   
   if (playerStreamUrl && playerStreamUrl.includes(".m3u8")) {
@@ -428,7 +428,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         <div className="w-full aspect-video bg-black overflow-hidden shadow-2xl">
           <VideoPlayer
             key={channel.id} 
-            streamUrl={playerStreamUrl}  {/* <-- USE THE PROXIED URL HERE */}
+            streamUrl={playerStreamUrl}
             channelName={channel.name}
             autoPlay={true}
             muted={false}
