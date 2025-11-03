@@ -1,4 +1,4 @@
-// /src/pages/ChannelPlayer.tsx - Fixed Version
+// /src/pages/ChannelPlayer.tsx - Final Version
 import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -18,6 +18,9 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 interface ChannelPlayerProps {
   channelId: string;
 }
+
+// Get the proxy path from your .env file
+const PROXY_URL = import.meta.env.VITE_PROXY_URL;
 
 const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   const [, setLocation] = useLocation();
@@ -361,6 +364,17 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
   const isChannelFavorite = isFavorite(channel.id);
 
+  // --- PROXY LOGIC ---
+  // Start with the original URL
+  let playerStreamUrl = channel.streamUrl;
+  
+  // Check if it's an M3U8 stream
+  if (playerStreamUrl && playerStreamUrl.includes(".m3u8")) {
+    // If it is, build the proxied URL
+    playerStreamUrl = `${PROXY_URL}?url=${encodeURIComponent(playerStreamUrl)}`;
+  }
+  // --- END OF PROXY LOGIC ---
+
   return (
     <ErrorBoundary>
       <div className="space-y-6 p-4 sm:p-6">
@@ -417,7 +431,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         <div className="w-full aspect-video bg-black overflow-hidden shadow-2xl">
           <VideoPlayer
             key={channel.id} 
-            streamUrl={channel.streamUrl}
+            streamUrl={playerStreamUrl} // <-- Use the proxied URL
             channelName={channel.name}
             autoPlay={true}
             muted={false}
