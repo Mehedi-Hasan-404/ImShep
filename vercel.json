@@ -1,5 +1,8 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
+    {
+      "source": "/api/m3u8-proxy",
+      "destination": "https://cors-stream-proxy.askerkhan193.workers.dev/proxy.m3u8"
+    }
   ]
 }
