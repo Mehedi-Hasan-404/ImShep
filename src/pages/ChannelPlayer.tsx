@@ -119,14 +119,28 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     return channels;
   };
 
+  // NEW: Server-side M3U parsing
   const fetchM3UPlaylist = async (m3uUrl: string, categoryId: string, categoryName: string): Promise<PublicChannel[]> => {
     try {
-      const response = await fetch(m3uUrl);
+      const response = await fetch('/api/parse-m3u', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          categoryId,
+          categoryName,
+          m3uUrl,
+        }),
+      });
+
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch M3U playlist');
       }
-      const m3uContent = await response.text();
-      return parseM3U(m3uContent, categoryId, categoryName);
+
+      const data = await response.json();
+      return data.channels || [];
     } catch (error) {
       console.error('Error fetching M3U playlist:', error);
       return [];
