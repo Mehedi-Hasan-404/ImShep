@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts
+// api/m3u8-proxy.ts - SECURE VERSION WITH ORIGIN VALIDATION
 export const config = {
   runtime: 'edge',
 };
@@ -6,8 +6,12 @@ export const config = {
 // Simple encryption/decryption functions
 const SECRET_KEY = process.env.PROXY_SECRET_KEY || 'your-secret-key-change-this-in-production';
 
+// Get allowed origins from environment variable
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:5000']; // Fallback for development
+
 function encryptUrl(url: string): string {
-  // Base64 encode with a simple XOR cipher
   const key = SECRET_KEY;
   let encrypted = '';
   for (let i = 0; i < url.length; i++) {
@@ -18,7 +22,6 @@ function encryptUrl(url: string): string {
 
 function decryptUrl(encrypted: string): string {
   try {
-    // Restore base64 padding and characters
     const restored = encrypted.replace(/-/g, '+').replace(/_/g, '/');
     const padded = restored + '=='.substring(0, (4 - restored.length % 4) % 4);
     const decoded = atob(padded);
@@ -34,20 +37,63 @@ function decryptUrl(encrypted: string): string {
   }
 }
 
+// Validate origin against allowed list
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  
+  // Check if origin matches any allowed origin
+  return ALLOWED_ORIGINS.some(allowedOrigin => {
+    // Exact match
+    if (origin === allowedOrigin) return true;
+    
+    // Allow subdomains if allowedOrigin starts with a dot
+    if (allowedOrigin.startsWith('.')) {
+      return origin.endsWith(allowedOrigin) || origin === allowedOrigin.substring(1);
+    }
+    
+    return false;
+  });
+}
+
+// Get appropriate CORS headers based on origin
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = isOriginAllowed(origin) ? origin : 'null';
+  
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin!,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+  };
+}
+
 export default async function handler(request: Request) {
-  const origin = request.headers.get('origin') || '';
+  const origin = request.headers.get('origin');
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Max-Age': '86400',
-      },
+      headers: getCorsHeaders(origin),
     });
+  }
+
+  // Validate origin for actual requests
+  if (!isOriginAllowed(origin)) {
+    console.warn(`Blocked request from unauthorized origin: ${origin}`);
+    return new Response(
+      JSON.stringify({ 
+        error: 'Unauthorized origin',
+        message: 'This API can only be accessed from authorized domains.'
+      }),
+      { 
+        status: 403,
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        }
+      }
+    );
   }
 
   const { searchParams } = new URL(request.url);
@@ -60,7 +106,7 @@ export default async function handler(request: Request) {
         status: 400, 
         headers: { 
           'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
+          ...getCorsHeaders(origin),
         } 
       }
     );
@@ -89,7 +135,7 @@ export default async function handler(request: Request) {
           status: response.status,
           headers: {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            ...getCorsHeaders(origin),
           },
         }
       );
@@ -99,13 +145,9 @@ export default async function handler(request: Request) {
     
     // If it's not a playlist, just proxy the content directly (segments, keys, etc.)
     if (!contentType.includes('mpegurl') && !contentType.includes('m3u')) {
-      const headers = new Headers({
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Range',
-        'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
-        'Cache-Control': 'public, max-age=3600',
-      });
+      const headers = new Headers(getCorsHeaders(origin));
+      headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+      headers.set('Cache-Control', 'public, max-age=3600');
 
       const contentLength = response.headers.get('content-length');
       if (contentLength) headers.set('Content-Length', contentLength);
@@ -175,10 +217,8 @@ export default async function handler(request: Request) {
 
     const headers = new Headers({
       'Content-Type': 'application/vnd.apple.mpegurl',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
       'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+      ...getCorsHeaders(origin),
     });
 
     return new Response(rewrittenLines.join('\n'), { headers });
@@ -194,7 +234,7 @@ export default async function handler(request: Request) {
         status: 500, 
         headers: { 
           'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
+          ...getCorsHeaders(origin),
         } 
       }
     );
