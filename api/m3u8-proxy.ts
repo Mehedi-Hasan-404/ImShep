@@ -3,8 +3,36 @@ export const config = {
   runtime: 'edge',
 };
 
-// Get allowed origins from environment
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['*'];
+// Simple encryption/decryption functions
+const SECRET_KEY = process.env.PROXY_SECRET_KEY || 'your-secret-key-change-this-in-production';
+
+function encryptUrl(url: string): string {
+  // Base64 encode with a simple XOR cipher
+  const key = SECRET_KEY;
+  let encrypted = '';
+  for (let i = 0; i < url.length; i++) {
+    encrypted += String.fromCharCode(url.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return btoa(encrypted).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function decryptUrl(encrypted: string): string {
+  try {
+    // Restore base64 padding and characters
+    const restored = encrypted.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = restored + '=='.substring(0, (4 - restored.length % 4) % 4);
+    const decoded = atob(padded);
+    
+    const key = SECRET_KEY;
+    let decrypted = '';
+    for (let i = 0; i < decoded.length; i++) {
+      decrypted += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return decrypted;
+  } catch (e) {
+    throw new Error('Invalid encrypted URL');
+  }
+}
 
 export default async function handler(request: Request) {
   const origin = request.headers.get('origin') || '';
@@ -23,11 +51,11 @@ export default async function handler(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const streamUrl = searchParams.get('url');
+  const encryptedUrl = searchParams.get('token');
 
-  if (!streamUrl) {
+  if (!encryptedUrl) {
     return new Response(
-      JSON.stringify({ error: 'Missing "url" query parameter' }),
+      JSON.stringify({ error: 'Missing "token" parameter' }),
       { 
         status: 400, 
         headers: { 
@@ -39,6 +67,9 @@ export default async function handler(request: Request) {
   }
 
   try {
+    // Decrypt the URL
+    const streamUrl = decryptUrl(encryptedUrl);
+
     // Fetch the original M3U8 file
     const response = await fetch(streamUrl, {
       headers: {
@@ -76,7 +107,6 @@ export default async function handler(request: Request) {
         'Cache-Control': 'public, max-age=3600',
       });
 
-      // Copy relevant headers from the original response
       const contentLength = response.headers.get('content-length');
       if (contentLength) headers.set('Content-Length', contentLength);
       
@@ -109,13 +139,13 @@ export default async function handler(request: Request) {
         } else if (line.startsWith('/')) {
           absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${line}`;
         } else {
-          // Relative to current path
           const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
           absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
         }
         
-        // Point it back to our own proxy
-        return `/api/m3u8-proxy?url=${encodeURIComponent(absoluteUrl)}`;
+        // Encrypt the URL and return proxied path
+        const encryptedToken = encryptUrl(absoluteUrl);
+        return `/api/m3u8-proxy?token=${encryptedToken}`;
       }
 
       // Rewrite encryption key URLs
@@ -125,7 +155,6 @@ export default async function handler(request: Request) {
           let absoluteKeyUrl: string;
           const keyUrl = uriMatch[1];
           
-          // Handle relative URLs
           if (keyUrl.startsWith('http://') || keyUrl.startsWith('https://')) {
             absoluteKeyUrl = keyUrl;
           } else if (keyUrl.startsWith('/')) {
@@ -135,16 +164,15 @@ export default async function handler(request: Request) {
             absoluteKeyUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${keyUrl}`;
           }
           
-          const proxiedKeyUrl = `/api/m3u8-proxy?url=${encodeURIComponent(absoluteKeyUrl)}`;
+          const encryptedToken = encryptUrl(absoluteKeyUrl);
+          const proxiedKeyUrl = `/api/m3u8-proxy?token=${encryptedToken}`;
           return line.replace(uriMatch[1], proxiedKeyUrl);
         }
       }
 
-      // Return all other lines (comments, etc.) unchanged
       return line;
     });
 
-    // Return the modified M3U8 file with proper headers
     const headers = new Headers({
       'Content-Type': 'application/vnd.apple.mpegurl',
       'Access-Control-Allow-Origin': '*',
@@ -160,8 +188,7 @@ export default async function handler(request: Request) {
     return new Response(
       JSON.stringify({ 
         error: 'Failed to proxy stream', 
-        details: e.message,
-        url: streamUrl 
+        details: e.message
       }),
       { 
         status: 500, 
