@@ -1,7 +1,7 @@
 // src/lib/urlEncryption.ts
 
 // This should match the SECRET_KEY in your api/m3u8-proxy.ts
-const SECRET_KEY = 'your-secret-key-change-this-in-production';
+const SECRET_KEY = 'turNjS/qrjIbiCMAQah952gc4WQU3OwdjfOZFF0NkSY=';
 
 export function encryptUrl(url: string): string {
   const key = SECRET_KEY;
