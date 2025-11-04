@@ -1,4 +1,4 @@
-// /src/pages/ChannelPlayer.tsx - FINAL FIXED VERSION
+// /src/pages/ChannelPlayer.tsx - FIXED PROXY VERSION
 import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -14,13 +14,11 @@ import { useFavorites } from '@/contexts/FavoritesContext';
 import { useRecents } from '@/contexts/RecentsContext';
 import { toast } from "@/components/ui/sonner";
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { getProxiedUrl } from '@/lib/urlEncryption';
 
 interface ChannelPlayerProps {
   channelId: string;
 }
-
-// Get the proxy path from your .env file
-const PROXY_URL = import.meta.env.VITE_PROXY_URL;
 
 const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   const [, setLocation] = useLocation();
@@ -364,13 +362,11 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
   const isChannelFavorite = isFavorite(channel.id);
 
-  // --- THIS IS THE PROXY LOGIC ---
-  let playerStreamUrl = channel.streamUrl;
-  
-  if (playerStreamUrl && playerStreamUrl.includes(".m3u8")) {
-    playerStreamUrl = `${PROXY_URL}?url=${encodeURIComponent(playerStreamUrl)}`;
-  }
-  // --- END OF PROXY LOGIC ---
+  // --- FIXED PROXY LOGIC ---
+  const playerStreamUrl = channel.streamUrl && channel.streamUrl.includes(".m3u8")
+    ? getProxiedUrl(channel.streamUrl)
+    : channel.streamUrl;
+  // --- END OF FIXED PROXY LOGIC ---
 
   return (
     <ErrorBoundary>
