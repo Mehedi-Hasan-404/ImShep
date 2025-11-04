@@ -118,7 +118,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (urlLower.includes('.mpd') || urlLower.includes('/dash/') || urlLower.includes('dash')) {
       return { type: 'dash', cleanUrl, drmInfo };
     }
-    
+
     // --- THIS IS THE FIX ---
     // If the URL is your proxy path OR contains .m3u8, treat it as HLS
     if (urlLower.includes('.m3u8') || urlLower.includes('/hls/') || urlLower.includes('hls') || urlLower.includes('/api/m3u8-proxy')) {
@@ -1912,3 +1912,4 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 };
 
 export default VideoPlayer;
+
