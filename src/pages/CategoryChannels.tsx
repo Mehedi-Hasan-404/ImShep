@@ -1,11 +1,11 @@
-// /src/pages/CategoryChannels.tsx
+// /src/pages/CategoryChannels.tsx - PROTECTED VERSION
 import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { PublicChannel, Category } from '@/types';
 import ChannelCard from '@/components/ChannelCard';
-import ErrorBoundary from '@/components/ErrorBoundary'; // Added for runtime safety
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -40,75 +40,35 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
     setFilteredChannels(filtered);
   }, [searchQuery, channels]);
 
-  const parseM3U = (m3uContent: string, categoryId: string, categoryName: string): PublicChannel[] => {
-    const lines = m3uContent.split('\n').map(line => line.trim()).filter(line => line);
-    const channels: PublicChannel[] = [];
-    let currentChannel: Partial<PublicChannel> = {};
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (line.startsWith('#EXTINF:')) {
-        // Enhanced name extraction - supports multiple M3U formats
-        let channelName = 'Unknown Channel';
-        
-        // Method 1: Try tvg-name attribute (most reliable)
-        const tvgNameMatch = line.match(/tvg-name="([^"]+)"/);
-        if (tvgNameMatch) {
-          channelName = tvgNameMatch[1].trim();
-        } else {
-          // Method 2: Try group-title attribute followed by comma and name
-          const groupTitleMatch = line.match(/group-title="[^"]*",(.+)$/);
-          if (groupTitleMatch) {
-            channelName = groupTitleMatch[1].trim();
-          } else {
-            // Method 3: Fallback to text after last comma (original method)
-            const nameMatch = line.match(/,([^,]+)$/);
-            if (nameMatch) {
-              channelName = nameMatch[1].trim();
-            }
-          }
-        }
-        
-        // Extract logo URL
-        const logoMatch = line.match(/tvg-logo="([^"]+)"/);
-        const logoUrl = logoMatch ? logoMatch[1] : '/channel-placeholder.svg';
-        
-        currentChannel = {
-          name: channelName,
-          logoUrl: logoUrl,
-          categoryId,
-          categoryName,
-        };
-      } else if (line && !line.startsWith('#') && currentChannel.name) {
-        const cleanChannelName = currentChannel.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-        const channel: PublicChannel = {
-          id: `${categoryId}_${cleanChannelName}_${channels.length}`,
-          name: currentChannel.name,
-          logoUrl: currentChannel.logoUrl || '/channel-placeholder.svg',
-          streamUrl: line,
-          categoryId,
-          categoryName,
-        };
-        channels.push(channel);
-        currentChannel = {};
-      }
-    }
-
-    return channels;
-  };
-
-  const fetchM3UPlaylist = async (m3uUrl: string, categoryId: string, categoryName: string): Promise<PublicChannel[]> => {
+  // NEW: Server-side M3U parsing
+  const fetchM3UPlaylistServerSide = async (
+    categoryId: string, 
+    categoryName: string, 
+    m3uUrl: string
+  ): Promise<PublicChannel[]> => {
     try {
-      const response = await fetch(m3uUrl);
+      const response = await fetch('/api/parse-m3u', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          categoryId,
+          categoryName,
+          m3uUrl, // Still sending URL for now, but you should fetch from Firestore server-side
+        }),
+      });
+
       if (!response.ok) {
-        throw new Error(`Failed to fetch M3U playlist: ${response.statusText}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch M3U playlist');
       }
-      const m3uContent = await response.text();
-      return parseM3U(m3uContent, categoryId, categoryName);
+
+      const data = await response.json();
+      return data.channels || [];
     } catch (error) {
-      console.error('Error fetching M3U playlist:', error);
-      throw error; // Rethrow for better error handling
+      console.error('Error fetching M3U playlist server-side:', error);
+      throw error;
     }
   };
 
@@ -133,21 +93,23 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
 
       let allChannels: PublicChannel[] = [];
 
+      // Fetch M3U channels via server-side API
       if (categoryData.m3uUrl) {
         try {
-          const m3uChannels = await fetchM3UPlaylist(
-            categoryData.m3uUrl, 
-            categoryData.id, 
-            categoryData.name
+          const m3uChannels = await fetchM3UPlaylistServerSide(
+            categoryData.id,
+            categoryData.name,
+            categoryData.m3uUrl
           );
           allChannels = [...allChannels, ...m3uChannels];
-          console.log(`Loaded ${m3uChannels.length} channels from M3U playlist`);
+          console.log(`Loaded ${m3uChannels.length} channels from M3U playlist (server-side)`);
         } catch (m3uError) {
           console.error('Error loading M3U playlist:', m3uError);
           setError('Failed to load M3U playlist channels. Please try again.');
         }
       }
 
+      // Fetch manual channels
       try {
         const channelsRef = collection(db, 'channels');
         const channelsQuery = query(channelsRef, where('categoryId', '==', categoryData.id));
