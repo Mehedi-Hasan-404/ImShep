@@ -214,7 +214,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     try {
       const Hls = (await import('hls.js')).default;
       if (Hls && Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, debug: false, capLevelToPlayerSize: true, maxLoadingDelay: 1, maxBufferLength: 15, maxBufferSize: 20 * 1000 * 1000, fragLoadingTimeOut: 8000, manifestLoadingTimeOut: 4000, startLevel: -1, startPosition: -1 });
+        const hls = new Hls({ enableWorker: true, debug: false, capLevelToPlayerSize: true, maxLoadingDelay: 1, maxBufferLength: 15, maxBufferSize: 20 * 1000 * 1000, fragLoadingTimeOut: 8000, manifestLoadingTimeOut: 4000, startLevel: -1, startPosition: -1, xhrSetup: (xhr: XMLHttpRequest) => {
+    const apiKey = import.meta.env.VITE_API_KEY;
+    if (apiKey) {
+      xhr.setRequestHeader('X-API-Key', apiKey);
+    }
+        } });
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
