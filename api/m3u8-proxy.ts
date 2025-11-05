@@ -1,15 +1,15 @@
-// api/m3u8-proxy.ts - SECURE VERSION WITH ORIGIN VALIDATION
+// api/m3u8-proxy.ts - WITH API KEY AUTHENTICATION
 export const config = {
   runtime: 'edge',
 };
 
-// Simple encryption/decryption functions
 const SECRET_KEY = process.env.PROXY_SECRET_KEY || 'your-secret-key-change-this-in-production';
+const API_KEY = process.env.API_KEY || 'your-api-key-change-this-in-production';
 
-// Get allowed origins from environment variable
+// Get allowed origins
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['http://localhost:5000']; // Fallback for development
+  : ['https://imshep.vercel.app'];
 
 function encryptUrl(url: string): string {
   const key = SECRET_KEY;
@@ -37,38 +37,25 @@ function decryptUrl(encrypted: string): string {
   }
 }
 
-// Validate origin against allowed list
 function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return false;
-  
-  // Check if origin matches any allowed origin
-  return ALLOWED_ORIGINS.some(allowedOrigin => {
-    // Exact match
-    if (origin === allowedOrigin) return true;
-    
-    // Allow subdomains if allowedOrigin starts with a dot
-    if (allowedOrigin.startsWith('.')) {
-      return origin.endsWith(allowedOrigin) || origin === allowedOrigin.substring(1);
-    }
-    
-    return false;
-  });
+  return ALLOWED_ORIGINS.includes(origin);
 }
 
-// Get appropriate CORS headers based on origin
 function getCorsHeaders(origin: string | null): Record<string, string> {
   const allowedOrigin = isOriginAllowed(origin) ? origin : 'null';
   
   return {
     'Access-Control-Allow-Origin': allowedOrigin!,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
     'Access-Control-Max-Age': '86400',
   };
 }
 
 export default async function handler(request: Request) {
   const origin = request.headers.get('origin');
+  const apiKey = request.headers.get('x-api-key');
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -78,13 +65,31 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Validate origin for actual requests
-  if (!isOriginAllowed(origin)) {
-    console.warn(`Blocked request from unauthorized origin: ${origin}`);
+  // ✅ SECURITY CHECK 1: Validate API Key
+  if (!apiKey || apiKey !== API_KEY) {
+    console.warn(`🚫 BLOCKED - Invalid API Key from origin: ${origin}`);
     return new Response(
       JSON.stringify({ 
-        error: 'Unauthorized origin',
-        message: 'This API can only be accessed from authorized domains.'
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key'
+      }),
+      { 
+        status: 401,
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        }
+      }
+    );
+  }
+
+  // ✅ SECURITY CHECK 2: Validate Origin
+  if (!isOriginAllowed(origin)) {
+    console.warn(`🚫 BLOCKED - Unauthorized origin: ${origin}`);
+    return new Response(
+      JSON.stringify({ 
+        error: 'Forbidden',
+        message: 'Access denied from this origin'
       }),
       { 
         status: 403,
@@ -113,23 +118,21 @@ export default async function handler(request: Request) {
   }
 
   try {
-    // Decrypt the URL
     const streamUrl = decryptUrl(encryptedUrl);
 
-    // Fetch the original M3U8 file
     const response = await fetch(streamUrl, {
       headers: {
-        'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0',
         'Referer': new URL(streamUrl).origin,
         'Accept': '*/*',
       },
     });
 
     if (!response.ok) {
-      console.error(`Failed to fetch ${streamUrl}: ${response.status} ${response.statusText}`);
+      console.error(`Failed to fetch ${streamUrl}: ${response.status}`);
       return new Response(
         JSON.stringify({ 
-          error: `Failed to fetch stream: ${response.status} ${response.statusText}` 
+          error: `Failed to fetch stream: ${response.status}` 
         }),
         {
           status: response.status,
@@ -143,7 +146,6 @@ export default async function handler(request: Request) {
 
     const contentType = response.headers.get('content-type') || '';
     
-    // If it's not a playlist, just proxy the content directly (segments, keys, etc.)
     if (!contentType.includes('mpegurl') && !contentType.includes('m3u')) {
       const headers = new Headers(getCorsHeaders(origin));
       headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
@@ -151,9 +153,6 @@ export default async function handler(request: Request) {
 
       const contentLength = response.headers.get('content-length');
       if (contentLength) headers.set('Content-Length', contentLength);
-      
-      const contentRange = response.headers.get('content-range');
-      if (contentRange) headers.set('Content-Range', contentRange);
       
       if (contentType) headers.set('Content-Type', contentType);
 
@@ -163,19 +162,15 @@ export default async function handler(request: Request) {
       });
     }
 
-    // It's a playlist - rewrite URLs
     const m3u8Content = await response.text();
     const baseUrl = new URL(streamUrl);
 
-    // Rewrite all internal URLs in the M3U8
     const rewrittenLines = m3u8Content.split('\n').map(line => {
       line = line.trim();
 
-      // Rewrite segment/playlist URLs (lines that don't start with #)
       if (line.length > 0 && !line.startsWith('#')) {
         let absoluteUrl: string;
         
-        // Handle relative URLs
         if (line.startsWith('http://') || line.startsWith('https://')) {
           absoluteUrl = line;
         } else if (line.startsWith('/')) {
@@ -185,12 +180,10 @@ export default async function handler(request: Request) {
           absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
         }
         
-        // Encrypt the URL and return proxied path
         const encryptedToken = encryptUrl(absoluteUrl);
         return `/api/m3u8-proxy?token=${encryptedToken}`;
       }
 
-      // Rewrite encryption key URLs
       if (line.startsWith('#EXT-X-KEY')) {
         const uriMatch = line.match(/URI="([^"]+)"/);
         if (uriMatch && uriMatch[1]) {
@@ -217,7 +210,7 @@ export default async function handler(request: Request) {
 
     const headers = new Headers({
       'Content-Type': 'application/vnd.apple.mpegurl',
-      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+      'Cache-Control': 'public, max-age=60',
       ...getCorsHeaders(origin),
     });
 
