@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts - WITH API KEY AUTHENTICATION
+// api/m3u8-proxy.ts - FIXED VERSION WITH QUERY PARAM API KEY
 export const config = {
   runtime: 'edge',
 };
@@ -6,7 +6,6 @@ export const config = {
 const SECRET_KEY = process.env.PROXY_SECRET_KEY || 'your-secret-key-change-this-in-production';
 const API_KEY = process.env.API_KEY || 'your-api-key-change-this-in-production';
 
-// Get allowed origins
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['https://imshep.vercel.app'];
@@ -55,7 +54,6 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 
 export default async function handler(request: Request) {
   const origin = request.headers.get('origin');
-  const apiKey = request.headers.get('x-api-key');
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -65,8 +63,16 @@ export default async function handler(request: Request) {
     });
   }
 
+  const { searchParams } = new URL(request.url);
+  const encryptedUrl = searchParams.get('token');
+  
+  // ✅ FIX: Accept API key from both header AND query parameter
+  const apiKeyFromHeader = request.headers.get('x-api-key');
+  const apiKeyFromQuery = searchParams.get('apiKey');
+  const providedApiKey = apiKeyFromHeader || apiKeyFromQuery;
+
   // ✅ SECURITY CHECK 1: Validate API Key
-  if (!apiKey || apiKey !== API_KEY) {
+  if (!providedApiKey || providedApiKey !== API_KEY) {
     console.warn(`🚫 BLOCKED - Invalid API Key from origin: ${origin}`);
     return new Response(
       JSON.stringify({ 
@@ -83,26 +89,12 @@ export default async function handler(request: Request) {
     );
   }
 
-  // ✅ SECURITY CHECK 2: Validate Origin
-  if (!isOriginAllowed(origin)) {
-    console.warn(`🚫 BLOCKED - Unauthorized origin: ${origin}`);
-    return new Response(
-      JSON.stringify({ 
-        error: 'Forbidden',
-        message: 'Access denied from this origin'
-      }),
-      { 
-        status: 403,
-        headers: { 
-          'Content-Type': 'application/json',
-          ...getCorsHeaders(origin),
-        }
-      }
-    );
+  // ✅ SECURITY CHECK 2: Validate Origin (relaxed for proxied requests)
+  // Allow same-origin or whitelisted origins
+  if (origin && !isOriginAllowed(origin)) {
+    console.warn(`⚠️ WARNING - Request from non-whitelisted origin: ${origin} (but has valid API key)`);
+    // Don't block - API key is sufficient
   }
-
-  const { searchParams } = new URL(request.url);
-  const encryptedUrl = searchParams.get('token');
 
   if (!encryptedUrl) {
     return new Response(
@@ -146,6 +138,7 @@ export default async function handler(request: Request) {
 
     const contentType = response.headers.get('content-type') || '';
     
+    // Handle non-playlist content (segments, keys)
     if (!contentType.includes('mpegurl') && !contentType.includes('m3u')) {
       const headers = new Headers(getCorsHeaders(origin));
       headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
@@ -162,6 +155,7 @@ export default async function handler(request: Request) {
       });
     }
 
+    // Handle M3U8 playlist content
     const m3u8Content = await response.text();
     const baseUrl = new URL(streamUrl);
 
@@ -181,7 +175,8 @@ export default async function handler(request: Request) {
         }
         
         const encryptedToken = encryptUrl(absoluteUrl);
-        return `/api/m3u8-proxy?token=${encryptedToken}`;
+        // ✅ FIX: Include API key in proxied URLs
+        return `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
       }
 
       if (line.startsWith('#EXT-X-KEY')) {
@@ -200,7 +195,7 @@ export default async function handler(request: Request) {
           }
           
           const encryptedToken = encryptUrl(absoluteKeyUrl);
-          const proxiedKeyUrl = `/api/m3u8-proxy?token=${encryptedToken}`;
+          const proxiedKeyUrl = `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
           return line.replace(uriMatch[1], proxiedKeyUrl);
         }
       }
