@@ -91,50 +91,70 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-  const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
-    let cleanUrl = url;
-    let drmInfo = null;
+  // CRITICAL FIX: Paste this function into VideoPlayer.tsx to replace the existing detectStreamType function
+
+const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
+  let cleanUrl = url;
+  let drmInfo = null;
+  
+  // Handle DRM parameters
+  if (url.includes('?|')) {
+    const [baseUrl, drmParams] = url.split('?|');
+    cleanUrl = baseUrl;
     
-    if (url.includes('?|')) {
-       const [baseUrl, drmParams] = url.split('?|');
-      cleanUrl = baseUrl;
+    if (drmParams) {
+      const params = new URLSearchParams(drmParams);
+      const drmScheme = params.get('drmScheme');
+      const drmLicense = params.get('drmLicense');
+      const token = params.get('token') || params.get('authToken');
       
-      if (drmParams) {
-        const params = new URLSearchParams(drmParams);
-        const drmScheme = params.get('drmScheme');
-        const drmLicense = params.get('drmLicense');
-        const token = params.get('token') || params.get('authToken');
-        
-        if (drmScheme && drmLicense) {
-          drmInfo = { scheme: drmScheme, license: drmLicense, token };
-        } else if (token) {
-          drmInfo = { token };
-        }
+      if (drmScheme && drmLicense) {
+        drmInfo = { scheme: drmScheme, license: drmLicense, token };
+      } else if (token) {
+        drmInfo = { token };
       }
     }
+  }
+
+  const urlLower = cleanUrl.toLowerCase();
   
-    const urlLower = cleanUrl.toLowerCase();
-    
-    if (urlLower.includes('.mpd') || urlLower.includes('/dash/') || urlLower.includes('dash')) {
-      return { type: 'dash', cleanUrl, drmInfo };
-    }
-
-    // --- THIS IS THE FIX ---
-    // If the URL is your proxy path OR contains .m3u8, treat it as HLS
-    if (urlLower.includes('.m3u8') || urlLower.includes('/hls/') || urlLower.includes('hls') || urlLower.includes('/api/m3u8-proxy')) {
-      return { type: 'hls', cleanUrl, drmInfo };
-    }
-    // --- END OF FIX ---
-
-    if (urlLower.includes('.mp4') || urlLower.includes('.webm') || urlLower.includes('.mov')) {
-      return { type: 'native', cleanUrl, drmInfo };
-    }
-    if (urlLower.includes('manifest') || drmInfo) {
-      return { type: 'dash', cleanUrl, drmInfo };
-    }
-    // FIX: Default to dash (Shaka) for better flexibility
+  // CRITICAL FIX: Check for M3U8 FIRST (highest priority)
+  // This includes both direct .m3u8 URLs and proxy URLs
+  if (urlLower.includes('.m3u8') || 
+      urlLower.includes('/hls/') || 
+      urlLower.includes('hls') || 
+      urlLower.includes('/api/m3u8-proxy')) {
+    console.log('🎬 Detected HLS stream:', cleanUrl);
+    return { type: 'hls', cleanUrl, drmInfo };
+  }
+  
+  // Check for DASH
+  if (urlLower.includes('.mpd') || 
+      urlLower.includes('/dash/') || 
+      urlLower.includes('dash')) {
+    console.log('🎬 Detected DASH stream:', cleanUrl);
     return { type: 'dash', cleanUrl, drmInfo };
-  }, []);
+  }
+
+  // Check for native video formats
+  if (urlLower.includes('.mp4') || 
+      urlLower.includes('.webm') || 
+      urlLower.includes('.mov')) {
+    console.log('🎬 Detected native video stream:', cleanUrl);
+    return { type: 'native', cleanUrl, drmInfo };
+  }
+  
+  // Check for manifest (could be DASH)
+  if (urlLower.includes('manifest') || drmInfo) {
+    console.log('🎬 Detected manifest/DRM stream, using DASH:', cleanUrl);
+    return { type: 'dash', cleanUrl, drmInfo };
+  }
+  
+  // CRITICAL FIX: Default to HLS instead of DASH
+  // Most IPTV streams are HLS, so this is a safer default
+  console.warn('⚠️ Unknown stream type, defaulting to HLS:', cleanUrl);
+  return { type: 'hls', cleanUrl, drmInfo };
+}, []);
 
   const destroyPlayer = useCallback(() => {
     if (hlsRef.current) {
