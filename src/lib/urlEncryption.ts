@@ -1,4 +1,4 @@
-// src/lib/urlEncryption.ts - FIXED VERSION WITH PROPER PROXY HANDLING
+// src/lib/urlEncryption.ts - COMPLETE FIXED VERSION
 const SECRET_KEY = 'turNjS/qrjIbiCMAQah952gc4WQU3OwdjfOZFF0NkSY=';
 const API_KEY = import.meta.env.VITE_API_KEY;
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || '/api/m3u8-proxy';
@@ -12,45 +12,7 @@ export function encryptUrl(url: string): string {
   return btoa(encrypted).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-/**
- * Returns full proxied URL with API key as query parameter
- * This ensures all requests (including HLS.js segment requests) have the API key
- */
-export function getProxiedUrl(originalUrl: string): string {
-  if (!originalUrl) return originalUrl;
-  
-  // Clean the URL - remove any existing proxy wrapping
-  let cleanUrl = originalUrl;
-  if (originalUrl.includes('/api/m3u8-proxy?token=')) {
-    // Already proxied, extract original URL
-    try {
-      const urlObj = new URL(originalUrl, window.location.origin);
-      const token = urlObj.searchParams.get('token');
-      if (token) {
-        cleanUrl = decryptUrl(token);
-      }
-    } catch (e) {
-      console.error('Error cleaning proxied URL:', e);
-    }
-  }
-  
-  // Only proxy M3U8 URLs
-  const isM3U8 = cleanUrl.toLowerCase().includes('.m3u8') || 
-                 cleanUrl.toLowerCase().includes('/hls/');
-  
-  if (isM3U8) {
-    const encryptedToken = encryptUrl(cleanUrl);
-    // CRITICAL: Include API key in URL so HLS.js automatically sends it with every request
-    return `${PROXY_URL}?token=${encryptedToken}&apiKey=${API_KEY || ''}`;
-  }
-  
-  return cleanUrl;
-}
-
-/**
- * Decrypt an encrypted URL token
- */
-function decryptUrl(encrypted: string): string {
+export function decryptUrl(encrypted: string): string {
   try {
     const restored = encrypted.replace(/-/g, '+').replace(/_/g, '/');
     const padded = restored + '=='.substring(0, (4 - restored.length % 4) % 4);
@@ -68,9 +30,46 @@ function decryptUrl(encrypted: string): string {
   }
 }
 
-/**
- * Get headers for manual fetch requests (not needed for HLS.js with query param API key)
- */
+export function getProxiedUrl(originalUrl: string): string {
+  if (!originalUrl) {
+    console.warn('getProxiedUrl: Empty URL provided');
+    return originalUrl;
+  }
+  
+  let cleanUrl = originalUrl;
+  if (originalUrl.includes('/api/m3u8-proxy?token=')) {
+    try {
+      const urlObj = new URL(originalUrl, window.location.origin);
+      const token = urlObj.searchParams.get('token');
+      if (token) {
+        cleanUrl = decryptUrl(token);
+        console.log('Unwrapped existing proxy URL:', cleanUrl);
+      }
+    } catch (e) {
+      console.error('Error cleaning proxied URL:', e);
+    }
+  }
+  
+  const urlLower = cleanUrl.toLowerCase();
+  const isM3U8 = urlLower.includes('.m3u8') || 
+                 urlLower.includes('/hls/') ||
+                 urlLower.includes('hls');
+  
+  if (isM3U8) {
+    const encryptedToken = encryptUrl(cleanUrl);
+    const proxiedUrl = `${PROXY_URL}?token=${encryptedToken}&apiKey=${API_KEY || ''}`;
+    console.log('🔐 Proxied URL generated:', {
+      original: cleanUrl,
+      proxied: proxiedUrl,
+      hasApiKey: !!API_KEY
+    });
+    return proxiedUrl;
+  }
+  
+  console.log('ℹ️ URL does not need proxying:', cleanUrl);
+  return cleanUrl;
+}
+
 export function getProxyHeaders(): HeadersInit {
   return {
     'X-API-Key': API_KEY || '',
