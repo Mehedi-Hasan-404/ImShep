@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts - FIXED VERSION WITH QUERY PARAM API KEY
+// api/m3u8-proxy.ts - COMPLETE FIXED VERSION
 export const config = {
   runtime: 'edge',
 };
@@ -42,7 +42,7 @@ function isOriginAllowed(origin: string | null): boolean {
 }
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
-  const allowedOrigin = isOriginAllowed(origin) ? origin : 'null';
+  const allowedOrigin = isOriginAllowed(origin) ? origin : '*';
   
   return {
     'Access-Control-Allow-Origin': allowedOrigin!,
@@ -66,12 +66,12 @@ export default async function handler(request: Request) {
   const { searchParams } = new URL(request.url);
   const encryptedUrl = searchParams.get('token');
   
-  // ✅ FIX: Accept API key from both header AND query parameter
+  // Accept API key from both header AND query parameter
   const apiKeyFromHeader = request.headers.get('x-api-key');
   const apiKeyFromQuery = searchParams.get('apiKey');
   const providedApiKey = apiKeyFromHeader || apiKeyFromQuery;
 
-  // ✅ SECURITY CHECK 1: Validate API Key
+  // SECURITY CHECK 1: Validate API Key
   if (!providedApiKey || providedApiKey !== API_KEY) {
     console.warn(`🚫 BLOCKED - Invalid API Key from origin: ${origin}`);
     return new Response(
@@ -89,13 +89,6 @@ export default async function handler(request: Request) {
     );
   }
 
-  // ✅ SECURITY CHECK 2: Validate Origin (relaxed for proxied requests)
-  // Allow same-origin or whitelisted origins
-  if (origin && !isOriginAllowed(origin)) {
-    console.warn(`⚠️ WARNING - Request from non-whitelisted origin: ${origin} (but has valid API key)`);
-    // Don't block - API key is sufficient
-  }
-
   if (!encryptedUrl) {
     return new Response(
       JSON.stringify({ error: 'Missing "token" parameter' }),
@@ -111,6 +104,7 @@ export default async function handler(request: Request) {
 
   try {
     const streamUrl = decryptUrl(encryptedUrl);
+    console.log('🔓 Decrypted stream URL:', streamUrl);
 
     const response = await fetch(streamUrl, {
       headers: {
@@ -121,7 +115,7 @@ export default async function handler(request: Request) {
     });
 
     if (!response.ok) {
-      console.error(`Failed to fetch ${streamUrl}: ${response.status}`);
+      console.error(`❌ Failed to fetch ${streamUrl}: ${response.status}`);
       return new Response(
         JSON.stringify({ 
           error: `Failed to fetch stream: ${response.status}` 
@@ -156,6 +150,7 @@ export default async function handler(request: Request) {
     }
 
     // Handle M3U8 playlist content
+    console.log('📋 Processing M3U8 playlist');
     const m3u8Content = await response.text();
     const baseUrl = new URL(streamUrl);
 
@@ -175,7 +170,7 @@ export default async function handler(request: Request) {
         }
         
         const encryptedToken = encryptUrl(absoluteUrl);
-        // ✅ FIX: Include API key in proxied URLs
+        // CRITICAL FIX: Include API key in ALL proxied URLs
         return `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
       }
 
@@ -195,6 +190,7 @@ export default async function handler(request: Request) {
           }
           
           const encryptedToken = encryptUrl(absoluteKeyUrl);
+          // CRITICAL FIX: Include API key in key URLs too
           const proxiedKeyUrl = `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
           return line.replace(uriMatch[1], proxiedKeyUrl);
         }
@@ -209,10 +205,11 @@ export default async function handler(request: Request) {
       ...getCorsHeaders(origin),
     });
 
+    console.log('✅ M3U8 playlist rewritten successfully');
     return new Response(rewrittenLines.join('\n'), { headers });
 
   } catch (e: any) {
-    console.error('Proxy error:', e);
+    console.error('❌ Proxy error:', e);
     return new Response(
       JSON.stringify({ 
         error: 'Failed to proxy stream', 
