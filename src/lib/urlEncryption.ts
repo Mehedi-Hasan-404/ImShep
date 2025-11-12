@@ -15,7 +15,9 @@ function generateToken(url: string): string {
     encoded += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
   }
   
-  return btoa(encoded)
+  // NEW (Correct)
+  // This combination correctly converts a multi-byte string to a UTF-8 Base64 string in browsers
+  return btoa(unescape(encodeURIComponent(encoded)))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
