@@ -931,6 +931,49 @@
     }
   }
 
+  /* Add this to src/index.css - Smooth Scroll Enhancement */
+
+/* Enable smooth scrolling globally */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Ensure smooth scrolling on mobile as well */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* For users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Prevent scroll jump during page transitions */
+.main-content {
+  scroll-margin-top: var(--header-height);
+}
+
+/* Ensure channel player starts at the top */
+.channel-player-container {
+  scroll-margin-top: 0;
+  padding-top: 0;
+}
+
+/* Add smooth transitions for layout shifts */
+@layer utilities {
+  .scroll-smooth {
+    scroll-behavior: smooth;
+  }
+  
+  .scroll-auto {
+    scroll-behavior: auto;
+  }
+}
+
   /* Responsive */
   @media (max-width: 768px) {
     .main-content {
