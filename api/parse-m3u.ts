@@ -1,4 +1,4 @@
-// api/parse-m3u.ts
+// api/parse-m3u.ts - FIXED WITH REFERER SUPPORT
 export const config = {
   runtime: 'edge',
 };
@@ -10,6 +10,7 @@ interface Channel {
   streamUrl: string;
   categoryId: string;
   categoryName: string;
+  referer?: string; // Add referer support
 }
 
 const parseM3U = (m3uContent: string, categoryId: string, categoryName: string): Channel[] => {
@@ -21,20 +22,21 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
     const line = lines[i];
 
     if (line.startsWith('#EXTINF:')) {
+      // Extract channel name (multiple methods for compatibility)
       let channelName = 'Unknown Channel';
       
-      // Method 1: Try tvg-name attribute
+      // Method 1: tvg-name attribute (most reliable)
       const tvgNameMatch = line.match(/tvg-name="([^"]+)"/);
       if (tvgNameMatch) {
         channelName = tvgNameMatch[1].trim();
       } else {
-        // Method 2: Try group-title attribute followed by comma and name
-        const groupTitleMatch = line.match(/group-title="[^"]*",(.+)$/);
+        // Method 2: group-title followed by comma and name
+        const groupTitleMatch = line.match(/group-title="[^"]*",\s*(.+)$/);
         if (groupTitleMatch) {
           channelName = groupTitleMatch[1].trim();
         } else {
-          // Method 3: Fallback to text after last comma
-          const nameMatch = line.match(/,([^,]+)$/);
+          // Method 3: text after last comma
+          const nameMatch = line.match(/,\s*([^,]+)$/);
           if (nameMatch) {
             channelName = nameMatch[1].trim();
           }
@@ -52,15 +54,43 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
         categoryName,
       };
     } else if (line && !line.startsWith('#') && currentChannel.name) {
+      // CRITICAL FIX: Handle pipe-separated referer format
+      let streamUrl = line;
+      let referer = '';
+      
+      // Check for |Referer= or |referer= format
+      if (line.includes('|Referer=') || line.includes('|referer=')) {
+        const parts = line.split('|');
+        streamUrl = parts[0].trim();
+        
+        // Extract referer from second part
+        const refererPart = parts[1];
+        if (refererPart) {
+          const refererMatch = refererPart.match(/(?:Referer|referer)=(.+)/);
+          if (refererMatch) {
+            referer = refererMatch[1].trim();
+          }
+        }
+      }
+      
+      // Generate unique ID
       const cleanChannelName = currentChannel.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const channelId = `${categoryId}_${cleanChannelName}_${channels.length}`;
+      
+      // Store referer in streamUrl using our special format
+      const finalStreamUrl = referer 
+        ? `${streamUrl}?__referer=${encodeURIComponent(referer)}`
+        : streamUrl;
+      
       const channel: Channel = {
-        id: `${categoryId}_${cleanChannelName}_${channels.length}`,
+        id: channelId,
         name: currentChannel.name,
         logoUrl: currentChannel.logoUrl || '/channel-placeholder.svg',
-        streamUrl: line,
+        streamUrl: finalStreamUrl,
         categoryId,
         categoryName,
       };
+      
       channels.push(channel);
       currentChannel = {};
     }
@@ -100,7 +130,7 @@ export default async function handler(request: Request) {
 
   try {
     const body = await request.json();
-    const { categoryId, categoryName } = body;
+    const { categoryId, categoryName, m3uUrl } = body;
 
     if (!categoryId || !categoryName) {
       return new Response(
@@ -115,11 +145,6 @@ export default async function handler(request: Request) {
       );
     }
 
-    // Get the M3U URL from your Firebase/Firestore
-    // For security, the M3U URL should be stored server-side only
-    // For now, we'll accept it in the request body, but you should fetch it from your database
-    const { m3uUrl } = body;
-
     if (!m3uUrl) {
       return new Response(
         JSON.stringify({ error: 'Missing m3uUrl' }),
@@ -132,6 +157,8 @@ export default async function handler(request: Request) {
         }
       );
     }
+
+    console.log(`📡 Fetching M3U playlist: ${m3uUrl}`);
 
     // Fetch the M3U playlist server-side
     const response = await fetch(m3uUrl);
@@ -151,6 +178,8 @@ export default async function handler(request: Request) {
 
     const m3uContent = await response.text();
     const channels = parseM3U(m3uContent, categoryId, categoryName);
+
+    console.log(`✅ Parsed ${channels.length} channels from M3U playlist`);
 
     return new Response(
       JSON.stringify({ channels }),
