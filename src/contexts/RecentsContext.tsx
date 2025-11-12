@@ -26,6 +26,7 @@ export const RecentsProvider: React.FC<RecentsProviderProps> = ({ children }) =>
   const [recents, setRecents] = useState<RecentChannel[]>([]);
 
   // Load recents from localStorage on mount
+  /*
   useEffect(() => {
     const saved = localStorage.getItem('iptv-recents');
     if (saved) {
@@ -36,11 +37,14 @@ export const RecentsProvider: React.FC<RecentsProviderProps> = ({ children }) =>
       }
     }
   }, []);
+  */
 
   // Save recents to localStorage whenever they change
+  /*
   useEffect(() => {
     localStorage.setItem('iptv-recents', JSON.stringify(recents));
   }, [recents]);
+  */
 
   const addRecent = (channel: Omit<RecentChannel, 'watchedAt'>) => {
     const newRecent: RecentChannel = {
