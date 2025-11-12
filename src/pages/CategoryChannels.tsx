@@ -40,18 +40,25 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
     setFilteredChannels(filtered);
   }, [searchQuery, channels]);
 
+  // Updated function with API Key
   const fetchM3UPlaylistServerSide = async (
     categoryId: string, 
     categoryName: string, 
     m3uUrl: string
   ): Promise<PublicChannel[]> => {
     try {
-      console.log('📡 Fetching M3U playlist from server:', m3uUrl);
+      const API_KEY = import.meta.env.VITE_API_KEY;
+      
+      if (!API_KEY) {
+        console.error('❌ API Key not configured');
+        throw new Error('API configuration error');
+      }
       
       const response = await fetch('/api/parse-m3u', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-API-Key': API_KEY, // SECURITY: Add API key
         },
         body: JSON.stringify({
           categoryId,
@@ -62,15 +69,13 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('❌ Server error:', errorData);
         throw new Error(errorData.error || 'Failed to fetch M3U playlist');
       }
 
       const data = await response.json();
-      console.log('✅ M3U channels loaded:', data.channels?.length || 0);
       return data.channels || [];
     } catch (error) {
-      console.error('❌ Error fetching M3U playlist server-side:', error);
+      console.error('❌ Error fetching M3U playlist:', error);
       throw error;
     }
   };
@@ -206,7 +211,7 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
             type="text"
             placeholder="Search channels..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => setSearchQuery(e.g.target.value)}
             className="form-input pl-10"
           />
         </div>
