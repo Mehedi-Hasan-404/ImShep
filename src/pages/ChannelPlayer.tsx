@@ -134,12 +134,21 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     return channels;
   };
 
+  // Updated function with API Key
   const fetchM3UPlaylist = async (m3uUrl: string, categoryId: string, categoryName: string): Promise<PublicChannel[]> => {
     try {
+      const API_KEY = import.meta.env.VITE_API_KEY;
+      
+      if (!API_KEY) {
+        console.error('❌ API Key not configured');
+        return [];
+      }
+      
       const response = await fetch('/api/parse-m3u', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-API-Key': API_KEY, // SECURITY: Add API key
         },
         body: JSON.stringify({
           categoryId,
@@ -150,7 +159,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch M3U playlist');
+        throw new Error(errorData.error || 'Failed to fetch MM3U playlist');
       }
 
       const data = await response.json();
