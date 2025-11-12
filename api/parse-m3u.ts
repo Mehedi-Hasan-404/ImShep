@@ -84,9 +84,12 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
       const cleanChannelName = currentChannel.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
       const channelId = `${categoryId}_${cleanChannelName}_${channels.length}`;
       
-      const finalStreamUrl = referer 
-        ? `${streamUrl}?__referer=${encodeURIComponent(referer)}`
-        : streamUrl;
+      // <-- FIX: Correctly append referer param, checking for existing '?'
+      let finalStreamUrl = streamUrl;
+      if (referer) {
+        const separator = streamUrl.includes('?') ? '&' : '?';
+        finalStreamUrl = `${streamUrl}${separator}__referer=${encodeURIComponent(referer)}`;
+      }
       
       const channel: Channel = {
         id: channelId,
