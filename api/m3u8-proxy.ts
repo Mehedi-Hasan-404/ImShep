@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts - SIMPLIFIED SECURE VERSION
+// api/m3u8-proxy.ts - UPDATED WITH REFERER SUPPORT
 export const config = {
   runtime: 'edge',
 };
@@ -58,14 +58,33 @@ export default async function handler(request: Request) {
   }
 
   try {
-    console.log(`🔄 Proxying: ${targetUrl.substring(0, 50)}...`);
+    // CRITICAL FIX: Extract referer from URL if present
+    const targetUrlObj = new URL(targetUrl);
+    const refererParam = targetUrlObj.searchParams.get('__referer');
+    
+    // Build fetch headers
+    const fetchHeaders: HeadersInit = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+    
+    // Add referer if specified
+    if (refererParam) {
+      fetchHeaders['Referer'] = decodeURIComponent(refererParam);
+      fetchHeaders['Origin'] = new URL(refererParam).origin;
+      console.log(`🔗 Using Referer: ${refererParam}`);
+      
+      // Remove the __referer param from the actual request URL
+      targetUrlObj.searchParams.delete('__referer');
+    } else {
+      fetchHeaders['Referer'] = new URL(targetUrl).origin;
+    }
+    
+    const cleanTargetUrl = refererParam ? targetUrlObj.toString() : targetUrl;
+    console.log(`🔄 Proxying: ${cleanTargetUrl.substring(0, 50)}...`);
 
     // Fetch the stream
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': new URL(targetUrl).origin,
-      },
+    const response = await fetch(cleanTargetUrl, {
+      headers: fetchHeaders,
     });
 
     if (!response.ok) {
@@ -87,7 +106,7 @@ export default async function handler(request: Request) {
     // Handle M3U8 playlists - rewrite URLs
     if (contentType.includes('mpegurl') || contentType.includes('m3u') || targetUrl.includes('.m3u8')) {
       const text = await response.text();
-      const baseUrl = new URL(targetUrl);
+      const baseUrl = new URL(cleanTargetUrl);
       
       const rewrittenPlaylist = text.split('\n').map(line => {
         line = line.trim();
@@ -106,6 +125,11 @@ export default async function handler(request: Request) {
         } else {
           const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
           absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
+        }
+        
+        // CRITICAL: Preserve referer in proxied URLs
+        if (refererParam) {
+          absoluteUrl += (absoluteUrl.includes('?') ? '&' : '?') + `__referer=${encodeURIComponent(refererParam)}`;
         }
         
         // Return proxied URL
