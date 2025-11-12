@@ -15,9 +15,8 @@ function generateToken(url: string): string {
     encoded += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
   }
   
-  // NEW (Correct)
-  // This combination correctly converts a multi-byte string to a UTF-8 Base64 string in browsers
-  return btoa(unescape(encodeURIComponent(encoded)))
+  // <-- FIX: Reverted to simple btoa() to match server's 'latin1' decode
+  return btoa(encoded)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
@@ -44,6 +43,7 @@ export function getProxiedUrl(originalUrl: string): string {
   
   // Check if URL needs proxying
   const urlLower = cleanUrl.toLowerCase();
+  // <-- FIX: Only proxy HLS streams per user request
   const isM3U8 = urlLower.includes('.m3u8') || 
                  urlLower.includes('/hls/') ||
                  urlLower.includes('hls');
