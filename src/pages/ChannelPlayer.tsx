@@ -1,5 +1,5 @@
-// /src/pages/ChannelPlayer.tsx - FIXED PROXY VERSION
-import { useState, useEffect } from 'react';
+// src/pages/ChannelPlayer.tsx - FIXED SCROLL ISSUE
+import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -29,8 +29,28 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // CRITICAL FIX: Add ref to scroll to top
+  const topRef = useRef<HTMLDivElement>(null);
+
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const { addRecent } = useRecents();
+
+  // CRITICAL FIX: Scroll to top when channel changes
+  useEffect(() => {
+    if (channel && topRef.current) {
+      // Smooth scroll to top
+      topRef.current.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start' 
+      });
+      
+      // Also scroll window to top (backup)
+      window.scrollTo({ 
+        top: 0, 
+        behavior: 'smooth' 
+      });
+    }
+  }, [channel?.id]); // Trigger when channel ID changes
 
   useEffect(() => {
     if (channelId) {
@@ -70,20 +90,16 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
       const line = lines[i];
 
       if (line.startsWith('#EXTINF:')) {
-        // Enhanced name extraction - supports multiple M3U formats
         let channelName = 'Unknown Channel';
         
-        // Method 1: Try tvg-name attribute (most reliable)
         const tvgNameMatch = line.match(/tvg-name="([^"]+)"/);
         if (tvgNameMatch) {
           channelName = tvgNameMatch[1].trim();
         } else {
-          // Method 2: Try group-title attribute followed by comma and name
           const groupTitleMatch = line.match(/group-title="[^"]*",(.+)$/);
           if (groupTitleMatch) {
             channelName = groupTitleMatch[1].trim();
           } else {
-            // Method 3: Fallback to text after last comma (original method)
             const nameMatch = line.match(/,([^,]+)$/);
             if (nameMatch) {
               channelName = nameMatch[1].trim();
@@ -91,7 +107,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
           }
         }
         
-        // Extract logo URL
         const logoMatch = line.match(/tvg-logo="([^"]+)"/);
         const logoUrl = logoMatch ? logoMatch[1] : '/channel-placeholder.svg';
 
@@ -119,7 +134,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     return channels;
   };
 
-  // NEW: Server-side M3U parsing
   const fetchM3UPlaylist = async (m3uUrl: string, categoryId: string, categoryName: string): Promise<PublicChannel[]> => {
     try {
       const response = await fetch('/api/parse-m3u', {
@@ -153,7 +167,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
       let categoryChannelsList: PublicChannel[] = [];
 
-      // Get manual channels from the same category
       try {
         const channelsRef = collection(db, 'channels');
         const channelsQuery = query(channelsRef, where('categoryId', '==', channel.categoryId));
@@ -167,7 +180,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         console.error('Error fetching manual channels:', manualChannelsError);
       }
 
-      // Get M3U channels from the same category
       try {
         const categoriesRef = collection(db, 'categories');
         const categoryDoc = await getDocs(query(categoriesRef, where('__name__', '==', channel.categoryId)));
@@ -190,7 +202,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         console.error('Error loading M3U playlist:', m3uError);
       }
 
-      // Filter out duplicates
       const uniqueChannels = categoryChannelsList.filter((ch, index, self) =>
         index === self.findIndex((t) => t.id === ch.id)
       );
@@ -215,7 +226,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
       const decodedChannelId = decodeURIComponent(channelId);
       let foundChannel: PublicChannel | null = null;
 
-      // 1. Search manual channels first
       try {
         const channelsRef = collection(db, 'channels');
         const channelsSnapshot = await getDocs(channelsRef);
@@ -238,7 +248,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         console.error('Error fetching manual channels:', manualChannelsError);
       }
 
-      // 2. Search M3U channels if not found
       if (!foundChannel) {
         const categoriesRef = collection(db, 'categories');
         const categoriesSnapshot = await getDocs(categoriesRef);
@@ -375,18 +384,16 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   }
 
   const isChannelFavorite = isFavorite(channel.id);
-
-  // --- FIXED PROXY LOGIC ---
   const playerStreamUrl = channel.streamUrl && channel.streamUrl.includes(".m3u8")
     ? getProxiedUrl(channel.streamUrl)
     : channel.streamUrl;
-  // --- END OF FIXED PROXY LOGIC ---
 
   return (
     <ErrorBoundary>
-      <div className="space-y-6 p-4 sm:p-6">
+      {/* CRITICAL FIX: Add ref for scroll target */}
+      <div ref={topRef} className="space-y-6 p-4 sm:p-6">
 
-        {/* Back Button at top left */}
+        {/* Back Button and Actions */}
         <div className="flex items-center justify-between -mt-2">
           <Button 
             variant="ghost" 
@@ -475,7 +482,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
                     className="group cursor-pointer border rounded-lg hover:border-accent transition-all duration-300 bg-card shadow-sm hover:shadow-lg transform hover:scale-105 relative overflow-hidden"
                     onClick={() => handleChannelSelect(ch)}
                   >
-                    {/* Favorite Star Button */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
