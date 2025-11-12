@@ -1,28 +1,59 @@
-// api/m3u8-proxy.ts - UPDATED WITH REFERER SUPPORT
+// api/m3u8-proxy.ts - COMPLETE FIXED VERSION
 export const config = {
   runtime: 'edge',
 };
 
-const API_KEY = process.env.API_KEY || 'your-api-key-change-this';
+const SECRET_KEY = process.env.PROXY_SECRET_KEY || 'your-secret-key-change-this-in-production';
+const API_KEY = process.env.API_KEY || 'your-api-key-change-this-in-production';
+
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['https://imshep.vercel.app'];
 
+function encryptUrl(url: string): string {
+  const key = SECRET_KEY;
+  let encrypted = '';
+  for (let i = 0; i < url.length; i++) {
+    encrypted += String.fromCharCode(url.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return btoa(encrypted).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function decryptUrl(encrypted: string): string {
+  try {
+    const restored = encrypted.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = restored + '=='.substring(0, (4 - restored.length % 4) % 4);
+    const decoded = atob(padded);
+    
+    const key = SECRET_KEY;
+    let decrypted = '';
+    for (let i = 0; i < decoded.length; i++) {
+      decrypted += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return decrypted;
+  } catch (e) {
+    throw new Error('Invalid encrypted URL');
+  }
+}
+
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
 function getCorsHeaders(origin: string | null): Record<string, string> {
-  const allowedOrigin = (origin && ALLOWED_ORIGINS.includes(origin)) ? origin : ALLOWED_ORIGINS[0];
+  const allowedOrigin = isOriginAllowed(origin) ? origin : '*';
   
   return {
-    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Origin': allowedOrigin!,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
     'Access-Control-Max-Age': '86400',
-    'Access-Control-Expose-Headers': 'Content-Length, Content-Type',
   };
 }
 
 export default async function handler(request: Request) {
   const origin = request.headers.get('origin');
-  const url = new URL(request.url);
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -32,65 +63,63 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Verify API key
-  const apiKey = request.headers.get('x-api-key') || url.searchParams.get('apiKey');
-  if (!apiKey || apiKey !== API_KEY) {
-    console.warn(`🚫 Unauthorized request from ${origin}`);
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: {
-        'Content-Type': 'application/json',
-        ...getCorsHeaders(origin),
+  const { searchParams } = new URL(request.url);
+  const encryptedUrl = searchParams.get('token');
+  
+  // Accept API key from both header AND query parameter
+  const apiKeyFromHeader = request.headers.get('x-api-key');
+  const apiKeyFromQuery = searchParams.get('apiKey');
+  const providedApiKey = apiKeyFromHeader || apiKeyFromQuery;
+
+  // SECURITY CHECK 1: Validate API Key
+  if (!providedApiKey || providedApiKey !== API_KEY) {
+    console.warn(`🚫 BLOCKED - Invalid API Key from origin: ${origin}`);
+    return new Response(
+      JSON.stringify({ 
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key'
+      }),
+      { 
+        status: 401,
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        }
       }
-    });
+    );
   }
 
-  // Get target URL from query parameter
-  const targetUrl = url.searchParams.get('url');
-  if (!targetUrl) {
-    return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
-      status: 400,
-      headers: {
-        'Content-Type': 'application/json',
-        ...getCorsHeaders(origin),
+  if (!encryptedUrl) {
+    return new Response(
+      JSON.stringify({ error: 'Missing "token" parameter' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        } 
       }
-    });
+    );
   }
 
   try {
-    // CRITICAL FIX: Extract referer from URL if present
-    const targetUrlObj = new URL(targetUrl);
-    const refererParam = targetUrlObj.searchParams.get('__referer');
-    
-    // Build fetch headers
-    const fetchHeaders: HeadersInit = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    };
-    
-    // Add referer if specified
-    if (refererParam) {
-      fetchHeaders['Referer'] = decodeURIComponent(refererParam);
-      fetchHeaders['Origin'] = new URL(refererParam).origin;
-      console.log(`🔗 Using Referer: ${refererParam}`);
-      
-      // Remove the __referer param from the actual request URL
-      targetUrlObj.searchParams.delete('__referer');
-    } else {
-      fetchHeaders['Referer'] = new URL(targetUrl).origin;
-    }
-    
-    const cleanTargetUrl = refererParam ? targetUrlObj.toString() : targetUrl;
-    console.log(`🔄 Proxying: ${cleanTargetUrl.substring(0, 50)}...`);
+    const streamUrl = decryptUrl(encryptedUrl);
+    console.log('🔓 Decrypted stream URL:', streamUrl);
 
-    // Fetch the stream
-    const response = await fetch(cleanTargetUrl, {
-      headers: fetchHeaders,
+    const response = await fetch(streamUrl, {
+      headers: {
+        'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0',
+        'Referer': new URL(streamUrl).origin,
+        'Accept': '*/*',
+      },
     });
 
     if (!response.ok) {
-      console.error(`❌ Fetch failed: ${response.status}`);
+      console.error(`❌ Failed to fetch ${streamUrl}: ${response.status}`);
       return new Response(
-        JSON.stringify({ error: `Failed to fetch: ${response.status}` }),
+        JSON.stringify({ 
+          error: `Failed to fetch stream: ${response.status}` 
+        }),
         {
           status: response.status,
           headers: {
@@ -102,22 +131,35 @@ export default async function handler(request: Request) {
     }
 
     const contentType = response.headers.get('content-type') || '';
+    
+    // Handle non-playlist content (segments, keys)
+    if (!contentType.includes('mpegurl') && !contentType.includes('m3u')) {
+      const headers = new Headers(getCorsHeaders(origin));
+      headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+      headers.set('Cache-Control', 'public, max-age=3600');
 
-    // Handle M3U8 playlists - rewrite URLs
-    if (contentType.includes('mpegurl') || contentType.includes('m3u') || targetUrl.includes('.m3u8')) {
-      const text = await response.text();
-      const baseUrl = new URL(cleanTargetUrl);
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) headers.set('Content-Length', contentLength);
       
-      const rewrittenPlaylist = text.split('\n').map(line => {
-        line = line.trim();
-        
-        // Skip comments and empty lines
-        if (line.startsWith('#') || !line) {
-          return line;
-        }
-        
-        // Rewrite segment URLs
+      if (contentType) headers.set('Content-Type', contentType);
+
+      return new Response(response.body, {
+        status: response.status,
+        headers,
+      });
+    }
+
+    // Handle M3U8 playlist content
+    console.log('📋 Processing M3U8 playlist');
+    const m3u8Content = await response.text();
+    const baseUrl = new URL(streamUrl);
+
+    const rewrittenLines = m3u8Content.split('\n').map(line => {
+      line = line.trim();
+
+      if (line.length > 0 && !line.startsWith('#')) {
         let absoluteUrl: string;
+        
         if (line.startsWith('http://') || line.startsWith('https://')) {
           absoluteUrl = line;
         } else if (line.startsWith('/')) {
@@ -127,50 +169,58 @@ export default async function handler(request: Request) {
           absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
         }
         
-        // CRITICAL: Preserve referer in proxied URLs
-        if (refererParam) {
-          absoluteUrl += (absoluteUrl.includes('?') ? '&' : '?') + `__referer=${encodeURIComponent(refererParam)}`;
+        const encryptedToken = encryptUrl(absoluteUrl);
+        // CRITICAL FIX: Include API key in ALL proxied URLs
+        return `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
+      }
+
+      if (line.startsWith('#EXT-X-KEY')) {
+        const uriMatch = line.match(/URI="([^"]+)"/);
+        if (uriMatch && uriMatch[1]) {
+          let absoluteKeyUrl: string;
+          const keyUrl = uriMatch[1];
+          
+          if (keyUrl.startsWith('http://') || keyUrl.startsWith('https://')) {
+            absoluteKeyUrl = keyUrl;
+          } else if (keyUrl.startsWith('/')) {
+            absoluteKeyUrl = `${baseUrl.protocol}//${baseUrl.host}${keyUrl}`;
+          } else {
+            const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+            absoluteKeyUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${keyUrl}`;
+          }
+          
+          const encryptedToken = encryptUrl(absoluteKeyUrl);
+          // CRITICAL FIX: Include API key in key URLs too
+          const proxiedKeyUrl = `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
+          return line.replace(uriMatch[1], proxiedKeyUrl);
         }
-        
-        // Return proxied URL
-        const proxiedUrl = `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}&apiKey=${apiKey}`;
-        return proxiedUrl;
-      }).join('\n');
+      }
 
-      return new Response(rewrittenPlaylist, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/vnd.apple.mpegurl',
-          'Cache-Control': 'public, max-age=60',
-          ...getCorsHeaders(origin),
-        },
-      });
-    }
-
-    // Pass through other content (segments, etc.)
-    const headers = new Headers(getCorsHeaders(origin));
-    if (contentType) headers.set('Content-Type', contentType);
-    
-    const contentLength = response.headers.get('content-length');
-    if (contentLength) headers.set('Content-Length', contentLength);
-    
-    headers.set('Cache-Control', 'public, max-age=3600');
-
-    return new Response(response.body, {
-      status: response.status,
-      headers,
+      return line;
     });
 
-  } catch (error: any) {
-    console.error('❌ Proxy error:', error);
+    const headers = new Headers({
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      'Cache-Control': 'public, max-age=60',
+      ...getCorsHeaders(origin),
+    });
+
+    console.log('✅ M3U8 playlist rewritten successfully');
+    return new Response(rewrittenLines.join('\n'), { headers });
+
+  } catch (e: any) {
+    console.error('❌ Proxy error:', e);
     return new Response(
-      JSON.stringify({ error: 'Proxy failed', details: error.message }),
-      {
-        status: 500,
-        headers: {
+      JSON.stringify({ 
+        error: 'Failed to proxy stream', 
+        details: e.message
+      }),
+      { 
+        status: 500, 
+        headers: { 
           'Content-Type': 'application/json',
           ...getCorsHeaders(origin),
-        }
+        } 
       }
     );
   }
