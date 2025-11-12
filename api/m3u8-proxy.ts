@@ -31,7 +31,7 @@ function verifyToken(token: string, url: string): boolean {
     const decoded = Buffer.from(
       token.replace(/-/g, '+').replace(/_/g, '/'),
       'base64'
-    ).toString();
+    ).toString('latin1'); // <-- FIX: Decode as latin1 to match client's btoa()
     
     let original = '';
     for (let i = 0; i < decoded.length; i++) {
