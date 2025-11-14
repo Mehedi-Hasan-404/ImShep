@@ -1,4 +1,4 @@
-// api/parse-m3u.ts - SECURED WITH API KEY
+// api/parse-m3u.ts - FIXED REFERER HANDLING
 export const config = {
   runtime: 'edge',
 };
@@ -68,13 +68,14 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
       let streamUrl = line;
       let referer = '';
       
+      // Parse referer from M3U format (e.g., URL|Referer=http://example.com)
       if (line.includes('|Referer=') || line.includes('|referer=')) {
         const parts = line.split('|');
         streamUrl = parts[0].trim();
         
         const refererPart = parts[1];
         if (refererPart) {
-          const refererMatch = refererPart.match(/(?:Referer|referer)=(.+)/);
+          const refererMatch = refererPart.match(/(?:Referer|referer)=(.+)/i);
           if (refererMatch) {
             referer = refererMatch[1].trim();
           }
@@ -84,10 +85,12 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
       const cleanChannelName = currentChannel.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
       const channelId = `${categoryId}_${cleanChannelName}_${channels.length}`;
       
-      // <-- FIX: Correctly append referer param, checking for existing '?'
+      // CRITICAL FIX: Correctly append referer parameter
       let finalStreamUrl = streamUrl;
       if (referer) {
-        const separator = streamUrl.includes('?') ? '&' : '?';
+        // Check if URL already has query parameters
+        const hasQueryParams = streamUrl.includes('?');
+        const separator = hasQueryParams ? '&' : '?';
         finalStreamUrl = `${streamUrl}${separator}__referer=${encodeURIComponent(referer)}`;
       }
       
