@@ -14,7 +14,7 @@ import { useFavorites } from '@/contexts/FavoritesContext';
 import { useRecents } from '@/contexts/RecentsContext';
 import { toast } from "@/components/ui/sonner";
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { getProxiedUrl } from '@/lib/urlEncryption';
+import { getProxiedUrl } from '@/lib/proxyHelper';
 
 // Enable debug logging
 const DEBUG = true;
