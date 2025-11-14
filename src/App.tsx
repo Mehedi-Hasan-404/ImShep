@@ -1,4 +1,4 @@
-// /src/App.tsx
+// src/App.tsx - WITH STREAM TEST ROUTE
 import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -9,13 +9,14 @@ import { FavoritesProvider } from "@/contexts/FavoritesContext";
 import { RecentsProvider } from "@/contexts/RecentsContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import Layout from "@/components/Layout";
-import { Analytics } from "@vercel/analytics/react"; // <-- Correct import for Vite/React
+import { Analytics } from "@vercel/analytics/react";
 
 const Home = lazy(() => import("@/pages/Home"));
 const Favorites = lazy(() => import("@/pages/Favorites"));
 const CategoryChannels = lazy(() => import("@/pages/CategoryChannels"));
 const ChannelPlayer = lazy(() => import("@/pages/ChannelPlayer"));
 const Admin = lazy(() => import("@/pages/Admin"));
+const StreamTest = lazy(() => import("@/pages/StreamTest")); // NEW
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -53,6 +54,10 @@ const App = () => (
                       <Layout><ChannelPlayer channelId={params?.channelId ?? ""} /></Layout>
                     }
                   </Route>
+                  {/* NEW: Stream Test Route */}
+                  <Route path="/test">
+                    <Layout><StreamTest /></Layout>
+                  </Route>
                   <Route path="/admin">
                     <Admin />
                   </Route>
@@ -67,7 +72,7 @@ const App = () => (
             </RecentsProvider>
           </FavoritesProvider>
         </Router>
-        <Analytics /> {/* <-- Add component here */}
+        <Analytics />
       </ThemeProvider>
     </TooltipProvider>
   </QueryClientProvider>
