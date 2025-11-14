@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts - COMPLETELY FIXED VERSION
+// api/m3u8-proxy.ts - VERIFIED TOKEN VERIFICATION
 export const config = {
   runtime: 'edge',
 };
@@ -8,24 +8,23 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['https://imshep.vercel.app'];
 
-// CRITICAL FIX: Match client-side token generation exactly
+/**
+ * Generate token (for verification purposes)
+ */
 function generateToken(url: string): string {
   const key = API_KEY.substring(0, 16);
-  const timestamp = Math.floor(Date.now() / 60000); // 1-minute buckets
+  const timestamp = Math.floor(Date.now() / 60000);
   const data = `${url}:${timestamp}`;
   
-  // Convert to bytes for XOR
   const encoder = new TextEncoder();
   const dataBytes = encoder.encode(data);
   const keyBytes = encoder.encode(key);
   
-  // XOR cipher
   const encoded = new Uint8Array(dataBytes.length);
   for (let i = 0; i < dataBytes.length; i++) {
     encoded[i] = dataBytes[i] ^ keyBytes[i % keyBytes.length];
   }
   
-  // Convert to base64 - use Buffer for Node.js compatibility
   const binaryString = String.fromCharCode(...encoded);
   const token = Buffer.from(binaryString, 'binary').toString('base64')
     .replace(/\+/g, '-')
@@ -35,6 +34,9 @@ function generateToken(url: string): string {
   return token;
 }
 
+/**
+ * Verify token with extended time window
+ */
 function verifyToken(token: string, url: string): boolean {
   try {
     const key = API_KEY.substring(0, 16);
@@ -52,20 +54,32 @@ function verifyToken(token: string, url: string): boolean {
     
     // Convert back to string
     const originalString = new TextDecoder().decode(original);
-    const [tokenUrl, tokenTime] = originalString.split(':');
+    const [tokenUrl, tokenTimeStr] = originalString.split(':');
+    
+    if (!tokenTimeStr) {
+      console.log('❌ Invalid token format (no timestamp)');
+      return false;
+    }
+    
+    const tokenTime = parseInt(tokenTimeStr);
     const currentTime = Math.floor(Date.now() / 60000);
     
-    // Token valid for 5 minutes
-    const isValid = tokenUrl === url && Math.abs(currentTime - parseInt(tokenTime)) <= 5;
+    // CRITICAL: Allow 5-minute window for token validity
+    const timeDiff = Math.abs(currentTime - tokenTime);
+    const isValid = tokenUrl === url && timeDiff <= 5;
     
     if (!isValid) {
       console.log('❌ Token validation failed:', {
-        tokenUrl: tokenUrl?.substring(0, 50),
-        expectedUrl: url?.substring(0, 50),
+        tokenUrl: tokenUrl?.substring(0, 50) + '...',
+        expectedUrl: url?.substring(0, 50) + '...',
+        urlMatch: tokenUrl === url,
         tokenTime,
         currentTime,
-        timeDiff: Math.abs(currentTime - parseInt(tokenTime))
+        timeDiff,
+        maxAllowed: 5
       });
+    } else {
+      console.log('✅ Token validated successfully');
     }
     
     return isValid;
@@ -99,13 +113,22 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Get token and target URL
+  // Get parameters
   const token = url.searchParams.get('token');
   const targetUrl = url.searchParams.get('url');
   
+  console.log('🔍 Proxy request:', {
+    hasToken: !!token,
+    hasUrl: !!targetUrl,
+    url: targetUrl?.substring(0, 100)
+  });
+  
   if (!targetUrl) {
     console.error('❌ Missing url parameter');
-    return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
+    return new Response(JSON.stringify({ 
+      error: 'Missing url parameter',
+      help: 'Use: /api/m3u8-proxy?url=<stream_url>&token=<token>'
+    }), {
       status: 400,
       headers: {
         'Content-Type': 'application/json',
@@ -114,10 +137,41 @@ export default async function handler(request: Request) {
     });
   }
 
+  if (!token) {
+    console.error('❌ Missing token parameter');
+    return new Response(JSON.stringify({ 
+      error: 'Missing token parameter',
+      help: 'Generate token using the client-side encryption library'
+    }), {
+      status: 401,
+      headers: {
+        'Content-Type': 'application/json',
+        ...getCorsHeaders(origin),
+      }
+    });
+  }
+
   // Verify token
-  if (!token || !verifyToken(token, targetUrl)) {
+  if (!verifyToken(token, targetUrl)) {
     console.warn(`🚫 Invalid token for ${targetUrl.substring(0, 50)}...`);
-    return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+    
+    // HELPFUL: Generate expected token for debugging
+    const expectedToken = generateToken(targetUrl);
+    console.log('🔧 Debug info:', {
+      receivedToken: token.substring(0, 30) + '...',
+      expectedToken: expectedToken.substring(0, 30) + '...',
+      match: token === expectedToken
+    });
+    
+    return new Response(JSON.stringify({ 
+      error: 'Invalid or expired token',
+      help: 'Token must be generated within the last 5 minutes',
+      debug: process.env.NODE_ENV === 'development' ? {
+        receivedTokenPreview: token.substring(0, 20),
+        expectedTokenPreview: expectedToken.substring(0, 20),
+        urlUsed: targetUrl.substring(0, 50)
+      } : undefined
+    }), {
       status: 401,
       headers: {
         'Content-Type': 'application/json',
@@ -138,7 +192,6 @@ export default async function handler(request: Request) {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     };
     
-    // Add referer if specified
     if (refererParam) {
       fetchHeaders['Referer'] = decodeURIComponent(refererParam);
       fetchHeaders['Origin'] = new URL(refererParam).origin;
@@ -147,17 +200,14 @@ export default async function handler(request: Request) {
       fetchHeaders['Referer'] = new URL(targetUrl).origin;
     }
     
-    // Support range requests for video segments
     const rangeHeader = request.headers.get('range');
     if (rangeHeader) {
       fetchHeaders['Range'] = rangeHeader;
     }
     
     const cleanTargetUrl = refererParam ? targetUrlObj.toString() : targetUrl;
-
     console.log(`📡 Fetching: ${cleanTargetUrl.substring(0, 100)}...`);
 
-    // Fetch with timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -169,9 +219,13 @@ export default async function handler(request: Request) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error(`❌ Fetch failed: ${response.status} for ${cleanTargetUrl.substring(0, 50)}...`);
+      console.error(`❌ Upstream error: ${response.status} for ${cleanTargetUrl.substring(0, 50)}...`);
       return new Response(
-        JSON.stringify({ error: `Upstream error: ${response.status}` }),
+        JSON.stringify({ 
+          error: `Upstream error: ${response.status}`,
+          statusText: response.statusText,
+          url: cleanTargetUrl.substring(0, 100)
+        }),
         {
           status: response.status,
           headers: {
@@ -184,51 +238,44 @@ export default async function handler(request: Request) {
 
     const contentType = response.headers.get('content-type') || '';
 
-    // Handle M3U8 playlists - OPTIMIZED
+    // Handle M3U8 playlists
     if (contentType.includes('mpegurl') || contentType.includes('m3u') || targetUrl.includes('.m3u8')) {
-      console.log(`📺 Processing M3U8 playlist: ${cleanTargetUrl.substring(0, 50)}...`);
+      console.log(`📺 Processing M3U8 playlist`);
       
       const text = await response.text();
       const baseUrl = new URL(cleanTargetUrl);
       
-      // Process playlist line by line (faster than split/map/join)
       const lines = text.split('\n');
       const rewrittenLines: string[] = [];
       
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+      for (const line of lines) {
+        const trimmedLine = line.trim();
         
-        // Skip comments and empty lines
-        if (!line || line.startsWith('#')) {
+        if (!trimmedLine || trimmedLine.startsWith('#')) {
           rewrittenLines.push(line);
           continue;
         }
         
-        // Rewrite segment/playlist URLs
         let absoluteUrl: string;
-        if (line.startsWith('http://') || line.startsWith('https://')) {
-          absoluteUrl = line;
-        } else if (line.startsWith('/')) {
-          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${line}`;
+        if (trimmedLine.startsWith('http://') || trimmedLine.startsWith('https://')) {
+          absoluteUrl = trimmedLine;
+        } else if (trimmedLine.startsWith('/')) {
+          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${trimmedLine}`;
         } else {
           const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
-          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
+          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${trimmedLine}`;
         }
         
-        // Preserve referer in proxied URLs
         if (refererParam) {
           absoluteUrl += (absoluteUrl.includes('?') ? '&' : '?') + `__referer=${encodeURIComponent(refererParam)}`;
         }
         
-        // Generate token for this URL
         const segmentToken = generateToken(absoluteUrl);
-        
-        // Return proxied URL with token
         const proxiedUrl = `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}&token=${segmentToken}`;
         rewrittenLines.push(proxiedUrl);
       }
 
-      console.log(`✅ M3U8 playlist processed: ${rewrittenLines.length} lines`);
+      console.log(`✅ M3U8 processed: ${rewrittenLines.length} lines`);
 
       return new Response(rewrittenLines.join('\n'), {
         status: 200,
@@ -240,8 +287,8 @@ export default async function handler(request: Request) {
       });
     }
 
-    // Pass through other content (video segments, etc.)
-    console.log(`📦 Passing through content: ${contentType}`);
+    // Pass through other content
+    console.log(`📦 Passing through: ${contentType}`);
     
     const headers = new Headers(getCorsHeaders(origin));
     if (contentType) headers.set('Content-Type', contentType);
@@ -255,7 +302,6 @@ export default async function handler(request: Request) {
     const acceptRanges = response.headers.get('accept-ranges');
     if (acceptRanges) headers.set('Accept-Ranges', acceptRanges);
     
-    // Cache video segments longer
     headers.set('Cache-Control', 'public, max-age=3600, immutable');
 
     return new Response(response.body, {
@@ -264,9 +310,13 @@ export default async function handler(request: Request) {
     });
 
   } catch (error: any) {
-    console.error('❌ Proxy error:', error.message);
+    console.error('❌ Proxy error:', error);
     return new Response(
-      JSON.stringify({ error: 'Proxy failed', details: error.message }),
+      JSON.stringify({ 
+        error: 'Proxy failed', 
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }),
       {
         status: 500,
         headers: {
