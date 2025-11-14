@@ -46,8 +46,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   
   const hlsRef = useRef<any>(null);
   const shakaPlayerRef = useRef<any>(null);
-  const playerTypeRef = useRef<'hls' | 'shaka' |
-  'native' | null>(null);
+  const playerTypeRef = useRef<'hls' | 'shaka' | 'native' | null>(null);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -85,77 +84,77 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     availableSubtitles: [] as SubtitleTrack[],
     availableAudioTracks: [] as AudioTrack[],
     currentSubtitle: '',
-    currentAudioTrack:
--1,
+    currentAudioTrack: -1,
     isSeeking: false,
     isPipActive: false,
     isLive: false,
   });
-// --- START: CORRECTED FUNCTION ---
-// This function replaces the buggy version from the original file
-const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
-  let cleanUrl = url;
-  let drmInfo = null;
-  
-  // Handle DRM parameters
-  if (url.includes('?|')) {
-    const [baseUrl, drmParams] = url.split('?|');
-    cleanUrl = baseUrl;
+
+  // --- START: CORRECTED FUNCTION ---
+  // This function replaces the buggy version from the original file
+  const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
+    let cleanUrl = url;
+    let drmInfo = null;
     
-    if (drmParams) {
-      const params = new URLSearchParams(drmParams);
-      const drmScheme = params.get('drmScheme');
-      const drmLicense = params.get('drmLicense');
-      const token = params.get('token') || params.get('authToken');
+    // Handle DRM parameters
+    if (url.includes('?|')) {
+      const [baseUrl, drmParams] = url.split('?|');
+      cleanUrl = baseUrl;
       
-      if (drmScheme && drmLicense) {
-        drmInfo = { scheme: drmScheme, license: drmLicense, token };
-      } else if (token) {
-        drmInfo = { token };
+      if (drmParams) {
+        const params = new URLSearchParams(drmParams);
+        const drmScheme = params.get('drmScheme');
+        const drmLicense = params.get('drmLicense');
+        const token = params.get('token') || params.get('authToken');
+        
+        if (drmScheme && drmLicense) {
+          drmInfo = { scheme: drmScheme, license: drmLicense, token };
+        } else if (token) {
+          drmInfo = { token };
+        }
       }
     }
-  }
 
-  const urlLower = cleanUrl.toLowerCase();
-  
-  // CRITICAL FIX: Check for HLS (REMOVED proxy check)
-  if (urlLower.includes('.m3u8') || 
-      urlLower.includes('/hls/') ||
-      urlLower.includes('hls')) {
-    console.log('🎬 Detected HLS stream:', cleanUrl);
+    const urlLower = cleanUrl.toLowerCase();
+    
+    // CRITICAL FIX: Check for HLS (ADDED proxy check)
+    if (urlLower.includes('.m3u8') || 
+        urlLower.includes('/hls/') ||
+        urlLower.includes('hls') ||
+        urlLower.includes('/api/m3u8-proxy') || // <-- MOVED HERE
+        url.includes('/api/m3u8-proxy')) { // <-- MOVED HERE
+      console.log('汐 Detected HLS stream (or proxy):', cleanUrl);
+      return { type: 'hls', cleanUrl, drmInfo };
+    }
+    
+    // CRITICAL FIX: Check for DASH (REMOVED proxy check)
+    if (urlLower.includes('.mpd') || 
+        urlLower.includes('/dash/') || 
+        urlLower.includes('dash')) { 
+      console.log('汐 Detected DASH stream:', cleanUrl);
+      return { type: 'dash', cleanUrl, drmInfo };
+    }
+
+    // Check for native video formats
+    if (urlLower.includes('.mp4') || 
+        urlLower.includes('.webm') || 
+        urlLower.includes('.mov')) {
+      console.log('汐 Detected native video stream:', cleanUrl);
+      return { type: 'native', cleanUrl, drmInfo };
+    }
+    
+    // Check for manifest (could be DASH)
+    if (urlLower.includes('manifest') || drmInfo) {
+      console.log('汐 Detected manifest/DRM stream, using DASH:', cleanUrl);
+      return { type: 'dash', cleanUrl, drmInfo };
+    }
+    
+    // CRITICAL FIX: Default to HLS instead of DASH
+    // Most IPTV streams are HLS, so this is a safer default
+    console.warn('裾 Unknown stream type, defaulting to HLS:', cleanUrl);
     return { type: 'hls', cleanUrl, drmInfo };
-  }
-  
-  // CRITICAL FIX: Check for DASH (ADDED proxy check)
-  if (urlLower.includes('.mpd') || 
-      urlLower.includes('/dash/') || 
-      urlLower.includes('dash') ||
-      urlLower.includes('/api/m3u8-proxy') || // <-- MOVED FROM HLS
-      url.includes('/api/m3u8-proxy')) { // <-- MOVED FROM HLS
-    console.log('🎬 Detected DASH stream (or proxy):', cleanUrl);
-    return { type: 'dash', cleanUrl, drmInfo };
-  }
-
-  // Check for native video formats
-  if (urlLower.includes('.mp4') || 
-      urlLower.includes('.webm') || 
-      urlLower.includes('.mov')) {
-    console.log('🎬 Detected native video stream:', cleanUrl);
-    return { type: 'native', cleanUrl, drmInfo };
-  }
-  
-  // Check for manifest (could be DASH)
-  if (urlLower.includes('manifest') || drmInfo) {
-    console.log('🎬 Detected manifest/DRM stream, using DASH:', cleanUrl);
-    return { type: 'dash', cleanUrl, drmInfo };
-  }
-  
-  // CRITICAL FIX: Default to HLS instead of DASH
-  // Most IPTV streams are HLS, so this is a safer default
-  console.warn('🐞 Unknown stream type, defaulting to HLS:', cleanUrl);
-  return { type: 'hls', cleanUrl, drmInfo };
-}, []);
-// --- END: CORRECTED FUNCTION ---
+  }, []);
+  // --- END: CORRECTED FUNCTION ---
 
   const destroyPlayer = useCallback(() => {
     if (hlsRef.current) {
@@ -176,6 +175,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     }
     playerTypeRef.current = null;
   }, []);
+
   const updateCurrentQualityHeight = useCallback(() => {
     let height = 720;
     if (playerTypeRef.current === 'hls' && hlsRef.current && hlsRef.current.currentLevel >= 0) {
@@ -187,6 +187,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     }
     setPlayerState(prev => ({ ...prev, currentQualityHeight: height }));
   }, []);
+
   const initializePlayer = useCallback(async () => {
     if (!streamUrl || !videoRef.current) {
       setPlayerState(prev => ({ ...prev, error: 'No stream URL provided', isLoading: false, showControls: false }));
@@ -213,8 +214,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
 
     try {
       const { type, cleanUrl, drmInfo } = detectStreamType(streamUrl);
-      if (type === 'dash') 
- {
+      if (type === 'dash') {
          playerTypeRef.current = 'shaka';
         await initShakaPlayer(cleanUrl, video, drmInfo);
       } else if (type === 'hls') {
@@ -253,15 +253,14 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           fragLoadingTimeOut: 3000,          // Faster timeout
           manifestLoadingTimeOut: 3000,      // Faster timeout
           fragLoadingMaxRetry: 2,            // Fewer retries initially
-           manifestLoadingMaxRetry: 2,
-     
-      fragLoadingRetryDelay: 500,        // Faster retry
+          manifestLoadingMaxRetry: 2,
+          fragLoadingRetryDelay: 500,        // Faster retry
           manifestLoadingRetryDelay: 500,
           
           // CRITICAL: Instant start
           maxFragLookUpTolerance: 0.1,       // Tighter tolerance
           liveSyncDurationCount: 2,
-     liveMaxLatencyDurationCount: 5,    // Lower latency
+          liveMaxLatencyDurationCount: 5,    // Lower latency
           
           // CRITICAL: Progressive loading
           startLevel: -1,                    // Auto-select
@@ -272,74 +271,67 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           maxLoadingDelay: 1,                // Start loading immediately
           
           // CRITICAL: Network optimizations
-       
-    manifestLoadPolicy: {
+          manifestLoadPolicy: {
             default: {
               maxTimeToFirstByteMs: 2000,    // Fast initial response
               maxLoadTimeMs: 5000,            // Quick timeout
               timeoutRetry: {
-    maxNumRetry: 
- 1,
+                maxNumRetry: 1,
                 retryDelayMs: 0,
                 maxRetryDelayMs: 0,
               },
               errorRetry: {
                 maxNumRetry: 2,
                 retryDelayMs: 500,
-   
-              maxRetryDelayMs: 1000,
+                maxRetryDelayMs: 1000,
               },
             },
           },
           
           playlistLoadPolicy: {
             default: {
-               maxTimeToFirstByteMs: 2000,
- 
+              maxTimeToFirstByteMs: 2000,
               maxLoadTimeMs: 5000,
               timeoutRetry: {
                 maxNumRetry: 1,
                 retryDelayMs: 0,
                 maxRetryDelayMs: 0,
-               },
-      
-         errorRetry: {
+              },
+              errorRetry: {
                 maxNumRetry: 2,
                 retryDelayMs: 500,
                 maxRetryDelayMs: 1000,
               },
-         },
+            },
           },
-    
-           
+          
           fragLoadPolicy: {
             default: {
               maxTimeToFirstByteMs: 2000,
               maxLoadTimeMs: 5000,
               timeoutRetry: {
-                 maxNumRetry: 1,
-        
-         retryDelayMs: 0,
+                maxNumRetry: 1,
+                retryDelayMs: 0,
                 maxRetryDelayMs: 0,
               },
               errorRetry: {
                 maxNumRetry: 2,
-                 retryDelayMs: 500,
-           
-      maxRetryDelayMs: 1000,
+                retryDelayMs: 500,
+                maxRetryDelayMs: 1000,
               },
             },
           },
           
           // Note: The xhrSetup from the original function was not in the new config.
-// If you need to add back the X-API-Key header, you can add it here like so:
+          // If you need to add back the X-API-Key header, you can add it here like so:
           // xhrSetup: (xhr: XMLHttpRequest) => {
           //   const apiKey = import.meta.env.VITE_API_KEY;
-//   if (apiKey) {
+          //   if (apiKey) {
           //     xhr.setRequestHeader('X-API-Key', apiKey);
-//   }
+          //   }
           // }
         });
+
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
@@ -351,29 +343,30 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ 
             height: level.height || 0, 
             bitrate: Math.round(level.bitrate / 1000), 
-             id: index 
+            id: index 
           }));
           
           let audioTracks: AudioTrack[] = [];
           if (hls.audioTracks && hls.audioTracks.length > 0) {
             audioTracks = hls.audioTracks.map((track: any, index: number) => ({
               id: index,
-               label: track.name || track.lang || `Audio ${index + 1}`,
+              label: track.name || track.lang || `Audio ${index + 1}`,
               language: track.lang || 'unknown'
             }));
           } else {
             audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
           }
           
-           video.muted = muted;
+          video.muted = muted;
           
           // CRITICAL: Instant playback attempt
           if (autoPlay) {
             video.play().catch(() => {});
- }
+          }
 
           const duration = video.duration;
           const isLive = (hls.liveSyncPosition !== null) && (!isFinite(duration) || duration === 0);
+
           setPlayerState(prev => ({ 
             ...prev, 
             isLoading: false, 
@@ -381,8 +374,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
             availableQualities: levels, 
             availableAudioTracks: audioTracks, 
             currentQuality: hls.currentLevel, 
-            currentAudioTrack: hls.audioTrack 
- || 0, 
+            currentAudioTrack: hls.audioTrack || 0, 
             isMuted: video.muted, 
             isPlaying: true, 
             showControls: true,
@@ -399,9 +391,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
             setPlayerState(prev => ({ ...prev, isLoading: false }));
           }
         });
+
         hls.on(Hls.Events.LEVEL_SWITCHED, () => {
           updateCurrentQualityHeight();
         });
+
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!isMountedRef.current) return;
           if (data.fatal) {
@@ -409,18 +403,18 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR: 
                 hls.startLoad(); 
-                 break;
+                break;
               case Hls.ErrorTypes.MEDIA_ERROR: 
                 hls.recoverMediaError(); 
                 break;
               default: 
                 setPlayerState(prev => ({ 
-                   ...prev, 
+                  ...prev, 
                   isLoading: false, 
                   error: `Playback Error: ${data.details}`,
                   showControls: false 
                 })); 
-                 destroyPlayer(); 
+                destroyPlayer(); 
                 break;
             }
           }
@@ -434,22 +428,24 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       throw error; 
     }
   };
-// --- END: REPLACED FUNCTION ---
+  // --- END: REPLACED FUNCTION ---
 
  const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
     try {
       // FIX: Use static import of Shaka Player
       if (shaka.polyfill) {
         shaka.polyfill.installAll();
- }
+      }
       
       const Player = shaka.Player;
       if (!Player || !Player.isBrowserSupported()) {
         throw new Error('This browser is not supported by Shaka Player');
       }
+
       if (shakaPlayerRef.current) await shakaPlayerRef.current.destroy();
       const player = new Player(video);
       shakaPlayerRef.current = player;
+
       player.configure({ 
         streaming: { 
           bufferingGoal: 15, 
@@ -459,16 +455,14 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           useNativeHlsOnSafari: true,
           jumpLargeGaps: true,
           inbandTextTracks: true,
-         },
+        },
         manifest: {
           retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
           dash: {
             clockSyncUri: '',
             ignoreDrmInfo: false,
             sequenceMode: true,
-            timeShiftBufferDepth: 
- 60,
- 
+            timeShiftBufferDepth: 60,
           },
         },
         abr: {
@@ -478,19 +472,18 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           bandwidthDowngradeSeconds: 10,
         },
         drm: {
-          retryParameters: 
- { timeout: 
- 5000, maxAttempts: 2 },
+          retryParameters: { timeout: 5000, maxAttempts: 2 },
           servers: {},
           advanced: {},
         },
         networking: {
           requestFilter: drmInfo && drmInfo.token ?
- (type: any, request: any) => {
+            (type: any, request: any) => {
               request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
- } : undefined,
+            } : undefined,
         },
       });
+
       if (drmInfo) {
         if (drmInfo.scheme === 'clearkey') {
           if (drmInfo.license && drmInfo.license.includes(':')) {
@@ -502,7 +495,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                 servers: { 'com.widevine.alpha': 'https://your-license-server.com/clearkey' },
                 advanced: {
                   'com.widevine.alpha': {
-                     requestType: 1,
+                    requestType: 1,
                     serverCertificate: undefined,
                   },
                 },
@@ -514,11 +507,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                 request.body = JSON.stringify({ kids: [], type: 'temporary' });
               }
             });
- }
+          }
         } else {
           if (drmInfo.licenseServer) {
             player.configure({ drm: { servers: { [drmInfo.scheme]: drmInfo.licenseServer } } });
- }
+          }
         }
       }
 
@@ -530,25 +523,30 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed - check live config';
         else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error - verify keys/token';
         else if (errorCode === 1003) errorMessage = 'No playable streams - invalid MPD';
+
         setPlayerState(prev => ({ 
           ...prev, 
           isLoading: false, 
           error: errorMessage, 
           showControls: false 
         }));
+
         if (errorCode >= 6000 && errorCode < 7000) {
           setTimeout(() => handleRetry(), 2000);
- }
+        }
         destroyPlayer();
       };
       player.addEventListener('error', onError);
 
       await player.load(url);
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+
       const tracks = player.getVariantTracks();
       const qualities: QualityLevel[] = tracks.map(track => ({ height: track.height || 0, bitrate: Math.round(track.bandwidth / 1000), id: track.id }));
+
       const textTracks = player.getTextTracks();
       const subtitles: SubtitleTrack[] = textTracks.map(track => ({ id: track.id.toString(), label: track.label || track.language || 'Unknown', language: track.language || 'unknown' }));
+
       let audioTracks: AudioTrack[] = [];
       const audioInfos = player.getAudioLanguagesAndRoles();
       if (audioInfos && audioInfos.length > 0) {
@@ -557,7 +555,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           label: audioInfo.language || `Audio ${index + 1}`,
           language: audioInfo.language || 'unknown'
         }));
- } else {
+      } else {
         const variants = player.getVariantTracks();
         const uniqueAudios = [...new Set(variants.map((v: any) => v.audioRoles ? v.audioRoles.join(',') : 'main'))];
         if (uniqueAudios.length > 1) {
@@ -566,9 +564,9 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
             label: role || `Audio ${index + 1}`,
             language: 'und'
           }));
- } else {
+        } else {
           audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
- }
+        }
       }
       
       video.muted = muted;
@@ -577,6 +575,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       // FIX: Correctly detect DVR (VOD) streams vs. true Live
       const duration = video.duration;
       const isLive = player.isLive() && (!isFinite(duration) || duration === 0);
+
       setPlayerState(prev => ({ 
         ...prev, 
         isLoading: false, 
@@ -587,8 +586,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         currentQuality: -1, 
         currentAudioTrack: 0,
         isMuted: video.muted, 
-        isPlaying: 
- true, 
+        isPlaying: true, 
         showControls: true,
         isLive: isLive,
         duration: isLive ? Infinity : duration,
@@ -598,7 +596,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       return () => player.removeEventListener('error', onError);
     } catch (error) { 
       throw error;
- }
+    }
   };
 
   const initNativePlayer = (url: string, video: HTMLVideoElement) => {
@@ -622,12 +620,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         isPlaying: true, 
         showControls: true,
         isLive: isLive,
-        duration: 
- isLive ? Infinity : duration,
+        duration: isLive ? Infinity : duration,
       }));
       updateCurrentQualityHeight();
       startControlsTimer();
     };
+
     const onError = () => {
       if (!isMountedRef.current) return;
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
@@ -637,15 +635,17 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         error: 'Failed to load stream with native player',
         showControls: false,
       }));
- };
+    };
 
     video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
     video.addEventListener('error', onError, { once: true });
+
     return () => {
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('error', onError);
     };
   };
+
   const formatTime = (time: number): string => {
     if (!isFinite(time) || time <= 0) return "0:00";
     const hours = Math.floor(time / 3600);
@@ -654,6 +654,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
+
   const changeQuality = useCallback((qualityId: number) => {
     if (playerTypeRef.current === 'hls' && hlsRef.current) {
       hlsRef.current.currentLevel = qualityId;
@@ -671,6 +672,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setExpandedSettingItem(null);
     lastActivityRef.current = Date.now();
   }, []);
+
   const changeSubtitle = useCallback((subtitleId: string) => {
     if (playerTypeRef.current === 'shaka' && shakaPlayerRef.current) {
       if (subtitleId === '') {
@@ -681,13 +683,14 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         if (targetTrack) {
           shakaPlayerRef.current.selectTextTrack(targetTrack);
           shakaPlayerRef.current.setTextTrackVisibility(true);
-         }
+        }
       }
     }
     setPlayerState(prev => ({ ...prev, currentSubtitle: subtitleId, showControls: true, showSettings: false }));
     setExpandedSettingItem(null);
     lastActivityRef.current = Date.now();
   }, []);
+
   const changeAudioTrack = useCallback((trackId: number) => {
     if (playerTypeRef.current === 'hls' && hlsRef.current) {
       hlsRef.current.audioTrack = trackId;
@@ -701,6 +704,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setExpandedSettingItem(null);
     lastActivityRef.current = Date.now();
   }, []);
+
   const changePlaybackSpeed = useCallback((speed: number) => {
     if (videoRef.current) {
       videoRef.current.playbackRate = speed;
@@ -709,10 +713,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setExpandedSettingItem(null);
     lastActivityRef.current = Date.now();
   }, []);
+
   const handleRetry = useCallback(() => {
     setPlayerState(prev => ({ ...prev, showControls: false }));
     setTimeout(initializePlayer, 500);
   }, [initializePlayer]);
+
   const startControlsTimer = useCallback(() => {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
@@ -721,6 +727,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       }
     }, CONTROLS_HIDE_DELAY);
   }, [playerState.isPlaying, playerState.showSettings]);
+
   const resetControlsTimer = useCallback(() => {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     setPlayerState(prev => ({ ...prev, showControls: true }));
@@ -731,6 +738,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       }, CONTROLS_HIDE_DELAY);
     }
   }, [playerState.isPlaying, playerState.showSettings, playerState.isSeeking]);
+
   useEffect(() => {
     isMountedRef.current = true;
     initializePlayer();
@@ -741,6 +749,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [streamUrl, initializePlayer, destroyPlayer]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -748,18 +757,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const handlePlay = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPlaying: true })); lastActivityRef.current = Date.now(); };
     const handlePause = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPlaying: false })); lastActivityRef.current = Date.now(); };
     const handleWaiting = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: true })); };
-    const handlePlaying = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: false, 
- isPlaying: true })); lastActivityRef.current = Date.now(); };
-    const handleTimeUpdate = () => { if (!isMountedRef.current || !video || playerState.isSeeking) return; const buffered = video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : 0; setPlayerState(prev => ({ ...prev, currentTime: video.currentTime, duration: video.duration ||
- 0, buffered: buffered })); };
-    const handleVolumeChange = () => { if (!isMountedRef.current || !video) return;
-      setPlayerState(prev => ({ ...prev, isMuted: video.muted })); };
-    const handleEnterPip = () => { if (!isMountedRef.current) return;
-      setPlayerState(prev => ({ ...prev, isPipActive: true })); };
-    const handleLeavePip = () => { if (!isMountedRef.current) return;
-      setPlayerState(prev => ({ ...prev, isPipActive: false })); };
-    const handleFullscreenChange = () => { if (!isMountedRef.current) return;
-      const isFullscreen = !!document.fullscreenElement; setPlayerState(prev => ({ ...prev, isFullscreen })); if (isFullscreen) resetControlsTimer(); };
+    const handlePlaying = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: false, isPlaying: true })); lastActivityRef.current = Date.now(); };
+    const handleTimeUpdate = () => { if (!isMountedRef.current || !video || playerState.isSeeking) return; const buffered = video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : 0; setPlayerState(prev => ({ ...prev, currentTime: video.currentTime, duration: video.duration || 0, buffered: buffered })); };
+    const handleVolumeChange = () => { if (!isMountedRef.current || !video) return; setPlayerState(prev => ({ ...prev, isMuted: video.muted })); };
+    const handleEnterPip = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPipActive: true })); };
+    const handleLeavePip = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPipActive: false })); };
+    const handleFullscreenChange = () => { if (!isMountedRef.current) return; const isFullscreen = !!document.fullscreenElement; setPlayerState(prev => ({ ...prev, isFullscreen })); if (isFullscreen) resetControlsTimer(); };
 
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
@@ -770,6 +773,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     video.addEventListener('enterpictureinpicture', handleEnterPip);
     video.addEventListener('leavepictureinpicture', handleLeavePip);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+
     return () => {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
@@ -782,11 +786,13 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, [playerState.isSeeking, resetControlsTimer]);
+
   useEffect(() => {
     if (!playerState.showSettings && playerState.isPlaying && !playerState.isSeeking) {
       startControlsTimer();
     }
   }, [playerState.showSettings, playerState.isPlaying, playerState.isSeeking, startControlsTimer]);
+
   useEffect(() => {
     let timeout: NodeJS.Timeout;
     const checkOrientation = () => {
@@ -796,7 +802,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         if (typeof window !== 'undefined') {
           const type = screen?.orientation?.type || '';
           setIsLandscape(type.includes('landscape') || window.innerWidth > window.innerHeight);
-         }
+        }
         setPlayerState(prev => ({ ...prev, isFullscreen: isFS }));
       }, 250);
     };
@@ -818,10 +824,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const interval = setInterval(updateCurrentQualityHeight, 2000);
     return () => clearInterval(interval);
   }, [updateCurrentQualityHeight]);
+
   const handleSheetTouchStart = (e: React.TouchEvent) => {
     touchStartYRef.current = e.touches[0].clientY;
     setSheetDragY(0);
   };
+
   const handleSheetTouchMove = (e: React.TouchEvent) => {
     if (touchStartYRef.current === null) return;
     const currentY = e.touches[0].clientY;
@@ -830,6 +838,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       setSheetDragY(deltaY);
     }
   };
+
   const handleSheetTouchEnd = () => {
     if (sheetDragY > 100) {
       setPlayerState(prev => ({ ...prev, showSettings: false }));
@@ -838,6 +847,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setSheetDragY(0);
     touchStartYRef.current = null;
   };
+
   const calculateNewTime = useCallback((clientX: number): number | null => {
     const video = videoRef.current;
     const progressBar = progressRef.current;
@@ -847,10 +857,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const percentage = clickX / rect.width;
     return percentage * video.duration;
   }, [playerState.isLive]);
+
   const throttledUpdate = useCallback((updateFn: () => void) => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(updateFn);
   }, []);
+
   // FIX: REMOVED e.preventDefault() to allow mouseup to fire
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -862,6 +874,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     video.pause();
     lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
+
   const handleDragMove = useCallback((e: MouseEvent) => {
     if (!dragStartRef.current?.isDragging) return; 
     e.preventDefault(); // Prevent page scroll
@@ -874,6 +887,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       lastActivityRef.current = Date.now();
     });
   }, [calculateNewTime, throttledUpdate]);
+
   const handleDragEnd = useCallback(() => {
     if (!dragStartRef.current?.isDragging) return; 
     const video = videoRef.current; 
@@ -886,12 +900,14 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     lastActivityRef.current = Date.now();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
+
   const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const newTime = calculateNewTime(e.clientX);
     if (newTime !== null && videoRef.current) videoRef.current.currentTime = newTime;
     setPlayerState(prev => ({ ...prev, showControls: true }));
     lastActivityRef.current = Date.now();
   }, [calculateNewTime]);
+
   // FIX: REMOVED e.preventDefault() to allow touchend to fire
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.stopPropagation();
@@ -903,7 +919,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const touch = e.touches[0];
     touchStartRef.current = { x: touch.clientX - rect.left, time: (touch.clientX - rect.left) / rect.width * video.duration };
     setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true }));
-     video.pause();
+    video.pause();
   }, [playerState.isLive]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
@@ -916,13 +932,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       const touch = e.touches[0];
       const deltaX = touch.clientX - rect.left - touchStartRef.current!.x;
       const percentage = Math.max(0, Math.min(1, (touchStartRef.current!.x + deltaX) / rect.width));
-      const newTime = 
- percentage 
- * (videoRef.current?.duration || 0);
+      const newTime = percentage * (videoRef.current?.duration || 0);
       setPlayerState(prev => ({ ...prev, currentTime: newTime }));
       seekTimeRef.current = newTime;
     });
   }, [throttledUpdate]);
+
   const handleTouchEnd = useCallback(() => {
     if (!touchStartRef.current || !videoRef.current) return;
     videoRef.current.currentTime = seekTimeRef.current;
@@ -931,6 +946,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setPlayerState(prev => ({ ...prev, isSeeking: false, isPlaying: !videoRef.current?.paused }));
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
+
   // FIX: Simplified logic to correctly handle play/pause for all player types
   const togglePlay = useCallback(() => {
     const video = videoRef.current; 
@@ -945,6 +961,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setPlayerState(prev => ({ ...prev, showControls: true })); 
     lastActivityRef.current = Date.now();
   }, []);
+
   // REVERT: Reverted to the original code. The 'volumechange' listener will handle the state update.
   const toggleMute = useCallback(() => {
     const video = videoRef.current; 
@@ -954,6 +971,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       lastActivityRef.current = Date.now(); 
     }
   }, []);
+
   const handleVolumeChange = useCallback((newVolume: number) => {
     const video = videoRef.current;
     if (video) {
@@ -964,6 +982,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       lastActivityRef.current = Date.now();
     }
   }, []);
+
   // REVERT: Reverted to the original code. The 'timeupdate' listener will handle the state update.
   const seekBackward = useCallback(() => {
     const video = videoRef.current;
@@ -978,6 +997,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setPlayerState(prev => ({ ...prev, showControls: true }));
     lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
+
   // REVERT: Reverted to the original code. The 'timeupdate' listener will handle the state update.
   const seekForward = useCallback(() => {
     const video = videoRef.current;
@@ -1004,7 +1024,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         if (screen.orientation && 'unlock' in screen.orientation) {
           try {
             (screen.orientation as any).unlock();
-           } catch (e) { }
+          } catch (e) { }
         }
       } else {
         await container.requestFullscreen();
@@ -1013,11 +1033,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
             await (screen.orientation as any).lock('landscape').catch(() => {});
           } catch (e) { }
         }
-       }
+      }
     } catch (error) { }
     setPlayerState(prev => ({ ...prev, showControls: true }));
     lastActivityRef.current = Date.now();
   }, [isMobile]);
+
   const togglePip = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !document.pictureInPictureEnabled) return;
@@ -1032,9 +1053,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setPlayerState(prev => ({ ...prev, showControls: true }));
     lastActivityRef.current = Date.now();
   }, []);
+
   const handleMouseMove = useCallback(() => {
     if (!playerState.showSettings) resetControlsTimer();
   }, [playerState.showSettings, resetControlsTimer]);
+
   const handlePlayerClick = useCallback(() => {
     if (playerState.showSettings) {
       setPlayerState(prev => ({ ...prev, showSettings: false }));
@@ -1048,6 +1071,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       }
     }
   }, [playerState.showSettings, playerState.showControls, resetControlsTimer]);
+
   const handleSettingsToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     setPlayerState(prev => {
@@ -1068,8 +1092,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const height = playerState.currentQualityHeight;
     if (playerState.currentQuality === -1) return `Auto (${height}p)`;
     const quality = playerState.availableQualities.find(q => q.id === playerState.currentQuality);
-    return quality ?
- `${quality.height}p` : `${height}p`;
+    return quality ? `${quality.height}p` : `${height}p`;
   };
 
   const getCurrentAudioLabel = () => {
@@ -1078,10 +1101,10 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
   };
 
   const getCurrentSpeedLabel = () => {
-    const speed = videoRef.current?.playbackRate ||
- 1;
+    const speed = videoRef.current?.playbackRate || 1;
     return speed === 1 ? 'Normal' : `${speed}x`;
   };
+
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (dragStartRef.current?.isDragging) handleDragMove(e);
@@ -1096,6 +1119,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       document.removeEventListener('mouseup', handleGlobalMouseUp);
     };
   }, [handleDragMove, handleDragEnd]);
+
   useEffect(() => {
     const handleGlobalTouchEnd = () => {
       if (touchStartRef.current) handleTouchEnd();
@@ -1103,8 +1127,8 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false });
     return () => document.removeEventListener('touchend', handleGlobalTouchEnd);
   }, [handleTouchEnd]);
-  const currentTimePercentage = isFinite(playerState.duration) && playerState.duration > 0 && !playerState.isLive ? (playerState.currentTime / playerState.duration) * 100 : playerState.isLive ?
- 100 : 0;
+
+  const currentTimePercentage = isFinite(playerState.duration) && playerState.duration > 0 && !playerState.isLive ? (playerState.currentTime / playerState.duration) * 100 : playerState.isLive ? 100 : 0;
 
   const getControlSizes = () => {
     const isTablet = isMobile && window.innerWidth > 768;
@@ -1123,11 +1147,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         gapClass: 'gap-4',
         textClass: 'text-lg',
         progressBarClass: 'h-2',
-         progressThumbClass: 'w-5 h-5',
+        progressThumbClass: 'w-5 h-5',
         progressInsetClass: 'left-2.5 right-2.5', // FIX: Added Inset
         containerPaddingClass: 'p-6'
       };
- }
+    }
     
     if (isMobileLandscape) {
       return {
@@ -1140,11 +1164,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         gapClass: 'gap-2',
         textClass: 'text-base',
         progressBarClass: 'h-1.5',
-         progressThumbClass: 'w-4 h-4',
+        progressThumbClass: 'w-4 h-4',
         progressInsetClass: 'left-2 right-2', // FIX: Added Inset
         containerPaddingClass: 'p-4'
       };
- }
+    }
     
     if (isMobilePortrait) {
       return {
@@ -1157,11 +1181,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         gapClass: 'gap-2',
         textClass: 'text-sm',
         progressBarClass: 'h-1',
-         progressThumbClass: 'w-3 h-3',
+        progressThumbClass: 'w-3 h-3',
         progressInsetClass: 'left-1.5 right-1.5', // FIX: Added Inset
         containerPaddingClass: 'p-3'
       };
- }
+    }
     
     if (isTablet) {
       return {
@@ -1174,11 +1198,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         gapClass: 'gap-3',
         textClass: 'text-base',
         progressBarClass: 'h-1.5',
-         progressThumbClass: 'w-4 h-4',
+        progressThumbClass: 'w-4 h-4',
         progressInsetClass: 'left-2 right-2', // FIX: Added Inset
         containerPaddingClass: 'p-4'
       };
- }
+    }
     
     return {
       iconSmall: 20,
@@ -1192,12 +1216,12 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       progressBarClass: 'h-1',
       progressThumbClass: 'w-3 h-3',
       progressInsetClass: 'left-1.5 right-1.5', // FIX: Added Inset
-      containerPaddingClass: 
- 'p-4'
+      containerPaddingClass: 'p-4'
     };
   };
 
   const sizes = getControlSizes();
+
   return (
     <div ref={containerRef} className={`relative bg-black w-full h-full ${className}`} onMouseMove={handleMouseMove} onClick={handlePlayerClick}>
       <video ref={videoRef} className="w-full h-full object-contain" playsInline controls={false} />
@@ -1206,8 +1230,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
           <div className="text-center text-white">
             <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin" />
-            <div 
- className={`${sizes.textClass}`}>Loading stream...</div>
+            <div className={`${sizes.textClass}`}>Loading stream...</div>
           </div>
         </div>
       )}
@@ -1216,27 +1239,25 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center p-4 z-50">
           <div className="text-center text-white max-w-md">
             <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-500" />
-            <h3 
- className="text-lg font-semibold mb-2">Playback Error</h3>
+            <h3 className="text-lg font-semibold mb-2">Playback Error</h3>
             <p className={`text-gray-300 mb-4 ${sizes.textClass}`}>{playerState.error}</p>
             <button onClick={handleRetry} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg flex items-center gap-2 mx-auto transition-colors">
               <RotateCcw size={16} />
               Retry
             </button>
           </div>
-       </div>
+        </div>
       )}
       
       {!playerState.error && (
-        <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 transition-opacity duration-300 ${playerState.showControls ?
-'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 transition-opacity duration-300 ${playerState.showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
           
           {isMobile && (
             <div className="absolute top-4 right-4 z-10">
               <button 
                 onClick={handleSettingsToggle}
                 className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} bg-black/50 backdrop-blur-sm rounded-full`}
-               data-testid="button-settings-mobile"
+                data-testid="button-settings-mobile"
               >
                 <Settings size={sizes.iconSmall} />
               </button>
@@ -1244,37 +1265,34 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
           )}
 
           {!playerState.isLoading && playerState.showControls && (
-         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <button 
                 onClick={(e) => { e.stopPropagation(); togglePlay(); }} 
                 className={`${sizes.centerButtonClass} bg-white bg-opacity-20 backdrop-blur-sm rounded-full flex items-center justify-center text-white hover:bg-opacity-30 transition-all pointer-events-auto`}
                 data-testid="button-play-pause-center"
-         >
-                {playerState.isPlaying ?
- (
+              >
+                {playerState.isPlaying ? (
                   <Pause size={sizes.centerIcon} fill="white" />
                 ) : (
                   <Play size={sizes.centerIcon} fill="white" className="ml-1" />
                 )}
               </button>
-        </div>
+            </div>
           )}
           
-          <div className={`absolute bottom-0 left-0 right-0 ${sizes.containerPaddingClass} flex flex-col`} style={{ maxHeight: isMobile ?
-'30%' : '25%' }}>
+          <div className={`absolute bottom-0 left-0 right-0 ${sizes.containerPaddingClass} flex flex-col`} style={{ maxHeight: isMobile ? '30%' : '25%' }}>
             <div className="mb-2 md:mb-3 flex-shrink-0">
               <div ref={progressRef} className="relative h-2 py-2 -my-2 bg-transparent cursor-pointer group" onClick={handleProgressClick} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
                 
                 {/* FIX FOR SEEKBAR ALIGNMENT: Replaced 'inset-x-0' with the new inset class */}
-                 <div className={`absolute ${sizes.progressInsetClass} top-1/2 -translate-y-1/2 ${sizes.progressBarClass} bg-white bg-opacity-30 rounded-full`}>
+                <div className={`absolute ${sizes.progressInsetClass} top-1/2 -translate-y-1/2 ${sizes.progressBarClass} bg-white bg-opacity-30 rounded-full`}>
                   
-                  <div className="absolute top-0 left-0 h-full bg-white bg-opacity-50 rounded-full" style={{ width: isFinite(playerState.duration) && playerState.duration > 0 ?
-`${(playerState.buffered / playerState.duration) * 100}%` : '0%' }}/>
+                  <div className="absolute top-0 left-0 h-full bg-white bg-opacity-50 rounded-full" style={{ width: isFinite(playerState.duration) && playerState.duration > 0 ? `${(playerState.buffered / playerState.duration) * 100}%` : '0%' }}/>
                   <div className="absolute top-0 left-0 h-full bg-red-500 rounded-full" style={{ width: `${currentTimePercentage}%` }}/>
                 </div>
                 
                 {/* FIX FOR SEEKBAR JUMP: Removed the 'scale-150' when playerState.isSeeking is true */}
-                 <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 ${sizes.progressThumbClass} rounded-full bg-red-500 transition-all duration-150 ease-out group-hover:scale-150`} style={{ left: `${currentTimePercentage}%` }} onMouseDown={handleDragStart} onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart}/>
+                <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 ${sizes.progressThumbClass} rounded-full bg-red-500 transition-all duration-150 ease-out group-hover:scale-150`} style={{ left: `${currentTimePercentage}%` }} onMouseDown={handleDragStart} onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart}/>
               </div>
             </div>
             
@@ -1284,53 +1302,48 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-wrap`}>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button 
-                      onClick={(e) => { e.stopPropagation();
- toggleMute(); }} 
+                      onClick={(e) => { e.stopPropagation(); toggleMute(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass}`}
                       data-testid="button-volume"
                     >
-                      {playerState.isMuted ?
- <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />}
+                      {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />}
                     </button>
                     
                     {/* FIX FOR DESKTOP VOLUME SLIDER: 
-                         Replaced all broken Tailwind classes with the single CSS class 'volume-slider-horizontal' 
+                        Replaced all broken Tailwind classes with the single CSS class 'volume-slider-horizontal' 
                         to show the "white marked area" (the track)
                     */}
                     <input
-                       type="range"
+                      type="range"
                       min="0"
                       max="100"
                       value={volume}
-                      onChange={(e) => 
- handleVolumeChange(Number(e.target.value))}
-                       className="w-20 flex-shrink-0 volume-slider-horizontal"
+                      onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                      className="w-20 flex-shrink-0 volume-slider-horizontal"
                       data-testid="slider-volume"
                       onClick={(e) => e.stopPropagation()}
                     />
-                 </div>
+                  </div>
                   
                   <div
                     className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-2`}
                     data-testid="text-time"
-                   >
-                    {playerState.isLive ?
- (
+                  >
+                    {playerState.isLive ? (
                       <span className="px-2 py-1 bg-red-600 rounded text-xs font-semibold">LIVE</span>
                     ) : (
                       <>{formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}</>
                     )}
-                   </div>
+                  </div>
                   
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button 
-                      onClick={(e) => { e.stopPropagation();
- seekBackward(); }} 
+                      onClick={(e) => { e.stopPropagation(); seekBackward(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       title="Seek backward 10s"
                       data-testid="button-rewind"
                     >
-                       <Rewind size={sizes.iconSmall} />
+                      <Rewind size={sizes.iconSmall} />
                     </button>
                     
                     <button 
@@ -1338,60 +1351,55 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       data-testid="button-play-pause"
                     >
-                      
- {playerState.isPlaying ?
- <Pause size={sizes.iconMedium} /> : <Play size={sizes.iconMedium} />}
+                      {playerState.isPlaying ? <Pause size={sizes.iconMedium} /> : <Play size={sizes.iconMedium} />}
                     </button>
                     
                     <button 
-                      onClick={(e) => { e.stopPropagation();
- seekForward(); }} 
+                      onClick={(e) => { e.stopPropagation(); seekForward(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       title="Seek forward 10s"
                       data-testid="button-forward"
                     >
-                       <FastForward size={sizes.iconSmall} />
+                      <FastForward size={sizes.iconSmall} />
                     </button>
                   </div>
                   
                   <div className="flex-1 min-w-4"></div>
-                   
+                  
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {document.pictureInPictureEnabled && (
                       <button 
-                         onClick={(e) => { e.stopPropagation(); togglePip(); }} 
+                        onClick={(e) => { e.stopPropagation(); togglePip(); }} 
                         className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                         title="Picture-in-picture"
                         data-testid="button-pip"
-                    >
+                      >
                         <PictureInPicture2 size={sizes.iconSmall} />
                       </button>
                     )}
                     
-                   <button 
+                    <button 
                       onClick={handleSettingsToggle}
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       title="Settings"
-                   data-testid="button-settings"
+                      data-testid="button-settings"
                     >
                       <Settings size={sizes.iconSmall} />
                     </button>
                     
-                   <button 
-                      onClick={(e) => { e.stopPropagation();
- toggleFullscreen(); }} 
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       title="Fullscreen"
                       data-testid="button-fullscreen"
                     >
-                        {playerState.isFullscreen ?
- <Minimize size={sizes.iconSmall} /> : <Maximize size={sizes.iconSmall} />}
+                      {playerState.isFullscreen ? <Minimize size={sizes.iconSmall} /> : <Maximize size={sizes.iconSmall} />}
                     </button>
                   </div>
                 </div>
               )}
               
-               {isMobile && (
+              {isMobile && (
                 // FIX FOR MOBILE CONTROLS OVERFLOW: Parent container (removed justify-between)
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-nowrap`}>
                   
@@ -1400,61 +1408,54 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                     <button 
                       onClick={(e) => { e.stopPropagation(); toggleMute(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
-                     data-testid="button-volume-mobile"
+                      data-testid="button-volume-mobile"
                     >
                       {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : <Volume2 size={sizes.iconSmall} />}
                     </button>
-                       
+                    
                     <div
                       className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-1`}
                       data-testid="text-time-mobile"
-                     >
-                       {playerState.isLive ?
- (
+                    >
+                      {playerState.isLive ? (
                         <span className="px-1.5 py-0.5 bg-red-600 rounded text-xs font-semibold">LIVE</span>
                       ) : (
                         /* FIX FOR CRASH: Replaced playerPlayerState.duration with playerState.duration */
-                       <>{formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}</>
+                        <>{formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}</>
                       )}
                     </div>
                   </div>
 
-                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Center group (added 
- flex-1, 
- min-w-0, justify-center) */}
+                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Center group (added flex-1, min-w-0, justify-center) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 justify-center`}>
                     <button 
-                      onClick={(e) => { e.stopPropagation();
- seekBackward(); }} 
+                      onClick={(e) => { e.stopPropagation(); seekBackward(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       data-testid="button-rewind-mobile"
                     >
                       <Rewind size={sizes.iconSmall} />
-                     </button>
-                    
-                    <button 
-                      onClick={(e) => { e.stopPropagation();
- togglePlay(); }} 
-                      className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
-                      data-testid="button-play-pause-mobile"
-                    >
-                      {playerState.isPlaying ?
- <Pause size={sizes.iconMedium} /> : <Play size={sizes.iconMedium} />}
                     </button>
                     
                     <button 
-                      onClick={(e) => { e.stopPropagation();
- seekForward(); }} 
+                      onClick={(e) => { e.stopPropagation(); togglePlay(); }} 
+                      className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
+                      data-testid="button-play-pause-mobile"
+                    >
+                      {playerState.isPlaying ? <Pause size={sizes.iconMedium} /> : <Play size={sizes.iconMedium} />}
+                    </button>
+                    
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); seekForward(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       data-testid="button-forward-mobile"
                     >
                       <FastForward size={sizes.iconSmall} />
-                     </button>
+                    </button>
                   </div>
 
                   {/* FIX FOR MOBILE CONTROLS OVERFLOW: Right group (added flex-shrink-0) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}>
-                   
+                  
                      {document.pictureInPictureEnabled && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); togglePip(); }} 
@@ -1467,20 +1468,18 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                     )}
                     
                     <button 
-                      onClick={(e) => { e.stopPropagation();
- toggleFullscreen(); }} 
+                      onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} 
                       className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
                       data-testid="button-fullscreen-mobile"
                     >
-                      {playerState.isFullscreen ?
- <Minimize size={sizes.iconSmall} /> : <Maximize size={sizes.iconSmall} />}
+                      {playerState.isFullscreen ? <Minimize size={sizes.iconSmall} /> : <Maximize size={sizes.iconSmall} />}
                     </button>
                   </div>
                 </div>
               )}
             </div>
           </div>
-       </div>
+        </div>
       )}
 
       {/* Settings Overlay - Desktop Only */}
@@ -1490,15 +1489,14 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
             className="absolute inset-0 bg-black/40 z-40"
             onClick={handleSettingsToggle}
           />
-           
+          
           <div 
             className="absolute z-50 bg-black/90 backdrop-blur-md rounded-lg bottom-20 right-4 w-[280px]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="py-2">
               {!expandedSettingItem ? (
-                 <>
- 
+                <>
                   {playerState.availableQualities.length > 0 && (
                     <button
                       onClick={() => handleSettingClick('quality')}
@@ -1507,7 +1505,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                       <div className="flex items-center gap-3">
                         <Settings size={18} />
                         <span className="text-sm">Quality</span>
-                       </div>
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-white/70">{getCurrentQualityLabel()}</span>
                         <ChevronRight size={16} className="text-white/70" />
@@ -1516,103 +1514,94 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                   )}
                   
                   <button
-                 onClick={() => handleSettingClick('speed')}
+                    onClick={() => handleSettingClick('speed')}
                     className="w-full flex items-center justify-between px-4 py-3 text-white hover:bg-white/10 transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                       <Play size={18} />
+                      <Play size={18} />
                       <span className="text-sm">Playback speed</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span 
- className="text-xs text-white/70">{getCurrentSpeedLabel()}</span>
-                       <ChevronRight size={16} className="text-white/70" />
+                      <span className="text-xs text-white/70">{getCurrentSpeedLabel()}</span>
+                      <ChevronRight size={16} className="text-white/70" />
                     </div>
                   </button>
                   
                    <button
-                     onClick={() => handleSettingClick('more')}
+                    onClick={() => handleSettingClick('more')}
                     className="w-full flex items-center justify-between px-4 py-3 text-white hover:bg-white/10 transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                         <Settings size={18} />
+                      <Settings size={18} />
                       <span className="text-sm">More</span>
                     </div>
                     <ChevronRight size={16} className="text-white/70" />
-                   </button>
-         
-        </>
-              ) : expandedSettingItem === 'quality' ?
- (
+                  </button>
+                </>
+              ) : expandedSettingItem === 'quality' ? (
                 <div>
                   <button
                     onClick={() => setExpandedSettingItem(null)}
                     className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                   >
+                  >
                     <ChevronRight size={18} className="rotate-180" />
                     <span className="text-sm">Quality</span>
                   </button>
                   <button
-                     onClick={() => { changeQuality(-1); }}
+                    onClick={() => { changeQuality(-1); }}
                     className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                       playerState.currentQuality === -1 ? 'bg-white/20' : 'hover:bg-white/10'
                     }`}
-                   >
+                  >
                     <span>Auto</span>
                     {playerState.currentQuality === -1 && <Check size={16} className="text-green-500 ml-auto" />}
                   </button>
                   {playerState.availableQualities.map((quality) => (
-                     <button
+                    <button
                       key={quality.id}
-                      onClick={() => { changeQuality(quality.id);
- }}
+                      onClick={() => { changeQuality(quality.id); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
-                        playerState.currentQuality === quality.id ?
- 'bg-white/20' : 'hover:bg-white/10'
+                        playerState.currentQuality === quality.id ? 'bg-white/20' : 'hover:bg-white/10'
                       }`}
                     >
                       <span>{quality.height}p</span>
                       {playerState.currentQuality === quality.id && <Check size={16} className="text-green-500 ml-auto" />}
-                   </button>
+                    </button>
                   ))}
                 </div>
-              ) : expandedSettingItem === 'speed' ?
- (
+              ) : expandedSettingItem === 'speed' ? (
                 <div>
                   <button
                     onClick={() => setExpandedSettingItem(null)}
                     className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                   >
+                  >
                     <ChevronRight size={18} className="rotate-180" />
                     <span className="text-sm">Playback speed</span>
                   </button>
                   {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
-                     <button
+                    <button
                       key={speed}
                       onClick={() => { changePlaybackSpeed(speed); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
-                       videoRef.current?.playbackRate === speed ? 'bg-white/20' : 'hover:bg-white/10'
+                        videoRef.current?.playbackRate === speed ? 'bg-white/20' : 'hover:bg-white/10'
                       }`}
                     >
                       <span>{speed === 1 ? 'Normal' : `${speed}x`}</span>
-                       {videoRef.current?.playbackRate === speed && <Check size={16} className="text-green-500 ml-auto" />}
+                      {videoRef.current?.playbackRate === speed && <Check size={16} className="text-green-500 ml-auto" />}
                     </button>
                   ))}
                 </div>
-              ) : expandedSettingItem === 'more' ?
- (
+              ) : expandedSettingItem === 'more' ? (
                 <div>
                   <button
                     onClick={() => setExpandedSettingItem(null)}
                     className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                   >
+                  >
                     <ChevronRight size={18} className="rotate-180" />
                     <span className="text-sm">More</span>
                   </button>
                   
-                  {playerState.availableSubtitles.length 
- > 
- 0 && (
+                  {playerState.availableSubtitles.length > 0 && (
                     <button
                       onClick={() => handleSettingClick('captions')}
                       className="w-full flex items-center justify-between px-12 py-2 text-sm text-white hover:bg-white/10 transition-colors"
@@ -1621,85 +1610,80 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                         <Subtitles size={16} />
                         <span>Captions</span>
                       </div>
-                     <ChevronRight size={14} className="text-white/70" />
+                      <ChevronRight size={14} className="text-white/70" />
                     </button>
                   )}
                   
                   <button
-                   onClick={() => handleSettingClick('audio')}
+                    onClick={() => handleSettingClick('audio')}
                     className="w-full flex items-center justify-between px-12 py-2 text-sm text-white hover:bg-white/10 transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                      <Music size={16} />
+                       <Music size={16} />
                       <span>Audio</span>
                     </div>
                     <ChevronRight size={14} className="text-white/70" />
                   </button>
-                 </div>
-              ) : expandedSettingItem === 'captions' ?
- (
+                </div>
+              ) : expandedSettingItem === 'captions' ? (
                 <div>
                   <button
                     onClick={() => handleSettingClick('more')}
                     className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                   >
+                  >
                     <ChevronRight size={18} className="rotate-180" />
                     <span className="text-sm">Captions</span>
                   </button>
                   <button
-                     onClick={() => { changeSubtitle(''); }}
+                    onClick={() => { changeSubtitle(''); }}
                     className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                       playerState.currentSubtitle === '' ? 'bg-white/20' : 'hover:bg-white/10'
                     }`}
-                   >
+                  >
                     <span>Off</span>
                     {playerState.currentSubtitle === '' && <Check size={16} className="text-green-500 ml-auto" />}
                   </button>
                   {playerState.availableSubtitles.map((subtitle) => (
-                     <button
+                    <button
                       key={subtitle.id}
-                      onClick={() => { changeSubtitle(subtitle.id);
- }}
+                      onClick={() => { changeSubtitle(subtitle.id); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
-                        playerState.currentSubtitle === subtitle.id ?
- 'bg-white/20' : 'hover:bg-white/10'
+                        playerState.currentSubtitle === subtitle.id ? 'bg-white/20' : 'hover:bg-white/10'
                       }`}
                     >
                       <span>{subtitle.label}</span>
                       {playerState.currentSubtitle === subtitle.id && <Check size={16} className="text-green-500 ml-auto" />}
-                   </button>
+                    </button>
                   ))}
                 </div>
-              ) : expandedSettingItem === 'audio' ?
- (
+              ) : expandedSettingItem === 'audio' ? (
                 <div>
                   <button
                     onClick={() => handleSettingClick('more')}
                     className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                   >
+                  >
                     <ChevronRight size={18} className="rotate-180" />
                     <span className="text-sm">Audio</span>
                   </button>
                   {playerState.availableAudioTracks.length > 0 ? (
-                     playerState.availableAudioTracks.map((audioTrack) => (
+                    playerState.availableAudioTracks.map((audioTrack) => (
                       <button
                         key={audioTrack.id}
                         onClick={() => { changeAudioTrack(audioTrack.id); }}
-                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
+                        className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                           playerState.currentAudioTrack === audioTrack.id ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                       >
-                       <span>{audioTrack.label}</span>
+                        <span>{audioTrack.label}</span>
                         {playerState.currentAudioTrack === audioTrack.id && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
                     ))
-                   ) : (
+                  ) : (
                     <div className="px-12 py-2 text-xs text-white/50">
                       No audio tracks available
                     </div>
                    )}
-   
-              </div>
+                </div>
               ) : null}
             </div>
           </div>
@@ -1707,25 +1691,22 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       )}
       
       {/* Settings Overlay - Mobile */}
-      {playerState.showSettings && isMobile && !playerState.error && 
- (
-      
-   <>
+      {playerState.showSettings && isMobile && !playerState.error && (
+        <>
           <div 
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
             style={{ backgroundColor: 'rgba(15, 15, 15, 0.92)' }}
             onClick={handleSettingsToggle}
           />
           
-          {isLandscape ?
- (
+          {isLandscape ? (
             <div 
               className="fixed z-50 bg-[#212121] bottom-0 left-0 right-0 rounded-t-[18px]"
               onClick={(e) => e.stopPropagation()}
               onTouchStart={handleSheetTouchStart}
               onTouchMove={handleSheetTouchMove}
               onTouchEnd={handleSheetTouchEnd}
-           style={{ transform: `translateY(${sheetDragY}px)` }}
+              style={{ transform: `translateY(${sheetDragY}px)` }}
             >
               <div className="flex justify-center pt-3 pb-2">
                 <div className="w-10 h-1 bg-white/30 rounded-full" />
@@ -1736,14 +1717,14 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                   <>
                     {playerState.availableQualities.length > 0 && (
                       <button
-                         onClick={() => handleSettingClick('quality')}
+                        onClick={() => handleSettingClick('quality')}
                         className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                       >
                         <div className="flex items-center gap-4">
-                           <Settings size={20} />
+                          <Settings size={20} />
                           <span style={{ fontSize: '15px', fontWeight: 400 }}>Quality</span>
                         </div>
-                       <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
                           <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
                             {getCurrentQualityLabel()}
                           </span>
@@ -1751,25 +1732,23 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                         </div>
                       </button>
                     )}
-                   
+                    
                     {playerState.availableSubtitles.length > 0 && (
                       <button
                         onClick={() => handleSettingClick('captions')}
-                       className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
+                        className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                       >
                         <div className="flex items-center gap-4">
                           <Subtitles size={20} />
-                             <span style={{ fontSize: '15px', fontWeight: 400 }}>Subtitles</span>
+                          <span style={{ fontSize: '15px', fontWeight: 400 }}>Subtitles</span>
                         </div>
                         <div className="flex items-center gap-2">
-                           <span style={{ 
- fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
-                            {playerState.currentSubtitle === '' ?
- 'Off' : playerState.availableSubtitles.find(s => s.id === playerState.currentSubtitle)?.label || 'Off'}
+                           <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
+                            {playerState.currentSubtitle === '' ? 'Off' : playerState.availableSubtitles.find(s => s.id === playerState.currentSubtitle)?.label || 'Off'}
                           </span>
                           <ChevronRight size={16} className="text-white/70" />
                         </div>
-                    </button>
+                      </button>
                     )}
                     
                     <button
@@ -1778,51 +1757,47 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                     >
                       <div className="flex items-center gap-4">
                         <Music size={20} />
-                         <span style={{ fontSize: '15px', fontWeight: 400 }}>Audio</span>
+                        <span style={{ fontSize: '15px', fontWeight: 400 }}>Audio</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span style={{ 
- fontSize: '14px', color: 
- 'rgba(255,255,255,0.7)' }}>
+                        <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
                           {getCurrentAudioLabel()}
                         </span>
                         <ChevronRight size={16} className="text-white/70" />
-                       </div>
+                      </div>
                     </button>
                     
                     <button
                       onClick={() => handleSettingClick('speed')}
-                     className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
+                      className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                     >
                       <div className="flex items-center gap-4">
                         <Play size={20} />
-                       <span style={{ fontSize: '15px', fontWeight: 400 }}>Playback speed</span>
+                        <span style={{ fontSize: '15px', fontWeight: 400 }}>Playback speed</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' 
- }}>
-                         {getCurrentSpeedLabel()}
+                        <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
+                          {getCurrentSpeedLabel()}
                         </span>
                         <ChevronRight size={16} className="text-white/70" />
                        </div>
-                     </button>
+                    </button>
                   </>
-                ) : expandedSettingItem === 'quality' ?
- (
+                ) : expandedSettingItem === 'quality' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                     >
+                    >
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Quality</span>
                     </button>
                     
- <button
+                    <button
                       onClick={() => { changeQuality(-1); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                         playerState.currentQuality === -1 ? 'bg-white/20' : 'hover:bg-white/10'
-                     }`}
+                      }`}
                     >
                       <span>Auto</span>
                       {playerState.currentQuality === -1 && <Check size={16} className="text-green-500 ml-auto" />}
@@ -1830,61 +1805,54 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                     {playerState.availableQualities.map((quality) => (
                       <button
                         key={quality.id}
-                        onClick={() => { 
- changeQuality(quality.id);
- }}
+                        onClick={() => { changeQuality(quality.id); }}
                         className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
-                          playerState.currentQuality === quality.id ?
- 'bg-white/20' : 'hover:bg-white/10'
+                          playerState.currentQuality === quality.id ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                       >
                         <span>{quality.height}p</span>
-                        {playerState.currentQuality === quality.id && 
- <Check size={16} className="text-green-500 ml-auto" />}
+                        {playerState.currentQuality === quality.id && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
                     ))}
                   </div>
-                ) : expandedSettingItem === 'speed' ?
- (
+                ) : expandedSettingItem === 'speed' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                     >
+                    >
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Playback speed</span>
                     </button>
-                   
- {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
+                    
+                    {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
                       <button
                         key={speed}
                         onClick={() => { changePlaybackSpeed(speed); }}
-                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
+                        className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                           videoRef.current?.playbackRate === speed ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                       >
-                      <span>{speed === 1 ? 'Normal' : `${speed}x`}</span>
+                        <span>{speed === 1 ? 'Normal' : `${speed}x`}</span>
                         {videoRef.current?.playbackRate === speed && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
-                   ))}
- 
+                    ))}
                   </div>
-                ) : expandedSettingItem === 'captions' ?
- (
+                ) : expandedSettingItem === 'captions' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                     >
+                    >
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Captions</span>
                     </button>
                     
- <button
+                    <button
                       onClick={() => { changeSubtitle(''); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                         playerState.currentSubtitle === '' ? 'bg-white/20' : 'hover:bg-white/10'
-                     }`}
+                      }`}
                     >
                       <span>Off</span>
                       {playerState.currentSubtitle === '' && <Check size={16} className="text-green-500 ml-auto" />}
@@ -1892,44 +1860,38 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                     {playerState.availableSubtitles.map((subtitle) => (
                       <button
                         key={subtitle.id}
-                        onClick={() => { 
- changeSubtitle(subtitle.id);
- }}
+                        onClick={() => { changeSubtitle(subtitle.id); }}
                         className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
-                          playerState.currentSubtitle === subtitle.id ?
- 'bg-white/20' : 'hover:bg-white/10'
+                          playerState.currentSubtitle === subtitle.id ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                       >
                         <span>{subtitle.label}</span>
-                        {playerState.currentSubtitle === subtitle.id && 
- <Check size={16} className="text-green-500 ml-auto" />}
+                        {playerState.currentSubtitle === subtitle.id && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
                     ))}
                   </div>
-                ) : expandedSettingItem === 'audio' ?
- (
+                ) : expandedSettingItem === 'audio' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-3 px-4 py-3 text-white"
-                     >
+                    >
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Audio</span>
                     </button>
                     
- {playerState.availableAudioTracks.length 
- > 0 ? (
+                    {playerState.availableAudioTracks.length > 0 ? (
                       playerState.availableAudioTracks.map((audioTrack) => (
                         <button
                           key={audioTrack.id}
-                         onClick={() => { changeAudioTrack(audioTrack.id); }}
+                          onClick={() => { changeAudioTrack(audioTrack.id); }}
                           className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
                             playerState.currentAudioTrack === audioTrack.id ? 'bg-white/20' : 'hover:bg-white/10'
-                        }`}
+                          }`}
                         >
                           <span>{audioTrack.label}</span>
                           {playerState.currentAudioTrack === audioTrack.id && <Check size={16} className="text-green-500 ml-auto" />}
-                         </button>
+                        </button>
                       ))
                     ) : (
                       <div className="px-12 py-2 text-xs text-white/50">
@@ -1938,37 +1900,36 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                     )}
                   </div>
                 ) : null}
-               </div>
+              </div>
             </div>
           ) : (
             <div 
               className="fixed z-50 bg-[#212121] bottom-0 left-0 right-0 rounded-t-[18px]"
               onClick={(e) => e.stopPropagation()}
               onTouchStart={handleSheetTouchStart}
-                onTouchMove={handleSheetTouchMove}
+              onTouchMove={handleSheetTouchMove}
               onTouchEnd={handleSheetTouchEnd}
               style={{ maxHeight: '60vh', transform: `translateY(${sheetDragY}px)` }}
             >
               <div className="flex justify-center pt-3 pb-2">
                 <div className="w-10 h-1 bg-white/30 rounded-full" />
-               </div>
+              </div>
  
               
               <div className="overflow-y-auto pb-4" style={{ maxHeight: '50vh' }}>
-                {!expandedSettingItem ?
- (
+                {!expandedSettingItem ? (
                   <>
                     {playerState.availableQualities.length > 0 && (
                       <button
                         onClick={() => handleSettingClick('quality')}
-                         className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
+                        className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                         style={{ minHeight: '56px' }}
                       >
                         <div className="flex items-center gap-4">
-                           <Settings size={20} />
+                          <Settings size={20} />
                           <span style={{ fontSize: '15px', fontWeight: 500 }}>Quality</span>
                         </div>
-                       <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
                           <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
                             {getCurrentQualityLabel()}
                           </span>
@@ -1976,175 +1937,163 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                         </div>
                       </button>
                     )}
-                   
+                    
                     <button
                       onClick={() => handleSettingClick('speed')}
                       className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
-                     style={{ minHeight: '56px' }}
+                      style={{ minHeight: '56px' }}
                     >
                       <div className="flex items-center gap-4">
                         <Play size={20} />
-                         <span style={{ fontSize: '15px', fontWeight: 500 }}>Playback speed</span>
+                        <span style={{ fontSize: '15px', fontWeight: 500 }}>Playback speed</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>
-                         {getCurrentSpeedLabel()}
+                          {getCurrentSpeedLabel()}
                         </span>
                         <ChevronRight size={16} className="text-white/70" />
                       </div>
-                   </button>
+                    </button>
                     
                     {playerState.availableSubtitles.length > 0 && (
                       <button
                          onClick={() => handleSettingClick('captions')}
- 
-                        className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
+                         className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                         style={{ minHeight: '56px' }}
                       >
-                         <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-4">
                           <Subtitles size={20} />
                           <span style={{ fontSize: '15px', fontWeight: 500 }}>Captions</span>
                          </div>
-                       <ChevronRight size={16} className="text-white/70" />
+                        <ChevronRight size={16} className="text-white/70" />
                       </button>
                     )}
                     
-                         <button
+                    <button
                       onClick={() => handleSettingClick('audio')}
                       className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                       style={{ minHeight: '56px' }}
-                     >
- 
+                    >
                       <div className="flex items-center gap-4">
                         <Music size={20} />
                         <span style={{ fontSize: '15px', fontWeight: 500 }}>Audio</span>
-                       </div>
+                      </div>
                       <ChevronRight size={16} className="text-white/70" />
                     </button>
                   </>
-                ) : expandedSettingItem === 
- 'quality' ?
- (
+                ) : expandedSettingItem === 'quality' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-4 px-4 py-4 text-white"
-                     >
+                    >
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Quality</span>
                     </button>
-                   <button
+                    <button
                       onClick={() => { changeQuality(-1); }}
                       className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
                         playerState.currentQuality === -1 ? 'bg-white/20' : 'hover:bg-white/10'
-                   }`}
+                      }`}
                       style={{ fontSize: '15px', fontWeight: 400 }}
                     >
                       <span>Auto</span>
-                       {playerState.currentQuality === -1 && <Check size={16} className="text-green-500 ml-auto" />}
+                      {playerState.currentQuality === -1 && <Check size={16} className="text-green-500 ml-auto" />}
                     </button>
                     {playerState.availableQualities.map((quality) => (
                       <button
                          key={quality.id}
-                        onClick={() => { changeQuality(quality.id);
- }}
+                        onClick={() => { changeQuality(quality.id); }}
                         className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
-                          playerState.currentQuality === quality.id ?
- 'bg-white/20' : 'hover:bg-white/10'
+                          playerState.currentQuality === quality.id ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                         style={{ fontSize: '15px', fontWeight: 400 }}
                       >
-                         <span>{quality.height}p</span>
+                        <span>{quality.height}p</span>
                         {playerState.currentQuality === quality.id && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
                     ))}
                   </div>
-                ) : expandedSettingItem === 'speed' ?
- (
+                ) : expandedSettingItem === 'speed' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-4 px-4 py-4 text-white"
-                     >
+                    >
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Playback speed</span>
                     </button>
-                   
-           {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
+                    
+                    {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
                       <button
                         key={speed}
                         onClick={() => { changePlaybackSpeed(speed); }}
-                       className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
+                        className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
                           videoRef.current?.playbackRate === speed ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
-                       style={{ fontSize: '15px', fontWeight: 400 }}
+                        style={{ fontSize: '15px', fontWeight: 400 }}
                       >
-                        <span>{speed === 1 ?
- 'Normal' : `${speed}x`}</span>
+                        <span>{speed === 1 ? 'Normal' : `${speed}x`}</span>
                         {videoRef.current?.playbackRate === speed && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
                     ))}
                   </div>
-                 ) : expandedSettingItem === 'captions' ?
- (
+                ) : expandedSettingItem === 'captions' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-4 px-4 py-4 text-white"
-                     >
+                    >
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Captions</span>
                     </button>
-                   
-           <button
+                    
+                    <button
                       onClick={() => { changeSubtitle(''); }}
                       className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
                         playerState.currentSubtitle === '' ? 'bg-white/20' : 'hover:bg-white/10'
-                     }`}
+                      }`}
                       style={{ fontSize: '15px', fontWeight: 400 }}
                     >
                       <span>Off</span>
-                       {playerState.currentSubtitle === '' && <Check size={16} className="text-green-500 ml-auto" />}
+                      {playerState.currentSubtitle === '' && <Check size={16} className="text-green-500 ml-auto" />}
                     </button>
                     {playerState.availableSubtitles.map((subtitle) => (
                       <button
-                       key={subtitle.id}
-                        onClick={() => { changeSubtitle(subtitle.id);
- }}
+                        key={subtitle.id}
+                        onClick={() => { changeSubtitle(subtitle.id); }}
                         className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
-                          playerState.currentSubtitle === subtitle.id ?
- 'bg-white/20' : 'hover:bg-white/10'
+                          playerState.currentSubtitle === subtitle.id ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                         style={{ fontSize: '15px', fontWeight: 400 }}
                       >
-                         <span>{subtitle.label}</span>
+                        <span>{subtitle.label}</span>
                         {playerState.currentSubtitle === subtitle.id && <Check size={16} className="text-green-500 ml-auto" />}
                       </button>
                     ))}
                   </div>
-                  ) : expandedSettingItem === 'audio' ?
- (
+                ) : expandedSettingItem === 'audio' ? (
                   <div className="px-4">
                     <button
                       onClick={() => setExpandedSettingItem(null)}
                       className="w-full flex items-center gap-4 px-4 py-4 text-white"
-                     >
+                    >
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Audio</span>
                     </button>
-                   
-           {playerState.availableAudioTracks.length > 0 ? (
+                    
+                    {playerState.availableAudioTracks.length > 0 ? (
                       playerState.availableAudioTracks.map((audioTrack) => (
                         <button
                           key={audioTrack.id}
-                           onClick={() => { changeAudioTrack(audioTrack.id); }}
+                          onClick={() => { changeAudioTrack(audioTrack.id); }}
                           className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
                             playerState.currentAudioTrack === audioTrack.id ? 'bg-white/20' : 'hover:bg-white/10'
-                        }`}
+                          }`}
                           style={{ fontSize: '15px', fontWeight: 400 }}
                         >
                           <span>{audioTrack.label}</span>
-                           {playerState.currentAudioTrack === audioTrack.id && <Check size={16} className="text-green-500 ml-auto" />}
+                          {playerState.currentAudioTrack === audioTrack.id && <Check size={16} className="text-green-500 ml-auto" />}
                         </button>
                       ))
                     ) : (
