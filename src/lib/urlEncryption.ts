@@ -1,11 +1,11 @@
-// src/lib/urlEncryption.ts - ENHANCED DEBUG VERSION
+// src/lib/urlEncryption.ts - FIXED VERSION
 const API_KEY = import.meta.env.VITE_API_KEY;
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || '/api/m3u8-proxy';
 
 // Enable debug logging
 const DEBUG = true;
 
-// Simple XOR cipher for token generation (matches server-side)
+// CRITICAL FIX: Use TextEncoder/TextDecoder for consistent encoding
 function generateToken(url: string): string {
   if (!API_KEY) {
     console.error('❌ API_KEY is not configured!');
@@ -16,13 +16,22 @@ function generateToken(url: string): string {
   const timestamp = Math.floor(Date.now() / 60000); // 1-minute buckets
   const data = `${url}:${timestamp}`;
   
-  let encoded = '';
-  for (let i = 0; i < data.length; i++) {
-    encoded += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  // Convert to Uint8Array for consistent byte handling
+  const dataBytes = new TextEncoder().encode(data);
+  const keyBytes = new TextEncoder().encode(key);
+  
+  // XOR cipher
+  const encoded = new Uint8Array(dataBytes.length);
+  for (let i = 0; i < dataBytes.length; i++) {
+    encoded[i] = dataBytes[i] ^ keyBytes[i % keyBytes.length];
   }
   
-  // Use btoa() to match server's 'latin1' decode
-  const token = btoa(encoded)
+  // Convert to base64 using standard btoa (which expects latin1)
+  const binaryString = Array.from(encoded)
+    .map(byte => String.fromCharCode(byte))
+    .join('');
+  
+  const token = btoa(binaryString)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
@@ -55,7 +64,6 @@ export function getProxiedUrl(originalUrl: string): string {
 
   if (!API_KEY) {
     console.error('❌ VITE_API_KEY is not configured in .env file!');
-    console.error('Please add VITE_API_KEY=your-key to your .env file');
     return originalUrl;
   }
   
@@ -68,7 +76,7 @@ export function getProxiedUrl(originalUrl: string): string {
       if (encodedUrl) {
         cleanUrl = decodeURIComponent(encodedUrl);
         if (DEBUG) {
-          console.log('🔄 URL was already proxied, extracted clean URL:', cleanUrl);
+          console.log('🔄 URL was already proxied, extracted clean URL:', cleanUrl.substring(0, 100));
         }
       }
     } catch (e) {
@@ -79,13 +87,16 @@ export function getProxiedUrl(originalUrl: string): string {
   // Check if URL needs proxying
   const urlLower = cleanUrl.toLowerCase();
   
-  // Check for M3U8/HLS streams
+  // CRITICAL FIX: More comprehensive M3U8/HLS detection
   const isM3U8 = urlLower.includes('.m3u8') || 
+                 urlLower.includes('.m3u') ||
                  urlLower.includes('/hls/') ||
                  urlLower.includes('hls') ||
-                 urlLower.includes('playlist.m3u8') ||
-                 urlLower.includes('index.m3u8') ||
-                 urlLower.includes('master.m3u8');
+                 urlLower.includes('playlist') ||
+                 urlLower.includes('master') ||
+                 urlLower.includes('index') ||
+                 cleanUrl.includes('|Referer=') || // M3U format with referer
+                 cleanUrl.includes('|referer=');
   
   if (isM3U8) {
     const token = generateToken(cleanUrl);
@@ -142,6 +153,4 @@ export function testProxy() {
 // Auto-run test in development
 if (import.meta.env.DEV) {
   console.log('🔧 URL Encryption module loaded in DEV mode');
-  // Uncomment to auto-test:
-  // testProxy();
 }
