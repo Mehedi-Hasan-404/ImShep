@@ -1,13 +1,10 @@
-// src/lib/urlEncryption.ts - COMPLETELY FIXED VERSION
+// src/lib/urlEncryption.ts - FIXED TO MATCH SERVER EXACTLY
 const API_KEY = import.meta.env.VITE_API_KEY;
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || '/api/m3u8-proxy';
 
-// Debug logging
-const DEBUG = false; // Set to false in production
-
 /**
  * Generate authentication token for stream URL
- * CRITICAL: Must match server-side implementation exactly
+ * CRITICAL: Must match server-side implementation EXACTLY
  */
 function generateToken(url: string): string {
   if (!API_KEY) {
@@ -16,55 +13,52 @@ function generateToken(url: string): string {
   }
   
   const key = API_KEY.substring(0, 16);
-  const timestamp = Math.floor(Date.now() / 60000); // 1-minute buckets for cache
+  const timestamp = Math.floor(Date.now() / 60000); // 1-minute buckets
   const data = `${url}:${timestamp}`;
   
-  // CRITICAL: Use TextEncoder for consistent byte conversion (matches server)
+  // CRITICAL: Use same encoding as server
   const encoder = new TextEncoder();
   const dataBytes = encoder.encode(data);
   const keyBytes = encoder.encode(key);
   
-  // XOR cipher
+  // XOR cipher (same as server)
   const encoded = new Uint8Array(dataBytes.length);
   for (let i = 0; i < dataBytes.length; i++) {
     encoded[i] = dataBytes[i] ^ keyBytes[i % keyBytes.length];
   }
   
-  // CRITICAL: Convert to base64 using proper method
-  let binaryString = '';
-  for (let i = 0; i < encoded.length; i++) {
-    binaryString += String.fromCharCode(encoded[i]);
-  }
+  // CRITICAL: Convert to base64 using ArrayBuffer (matches Node.js Buffer)
+  const binaryString = Array.from(encoded)
+    .map(byte => String.fromCharCode(byte))
+    .join('');
   
-  // URL-safe base64 encoding
+  // URL-safe base64 encoding (same as server)
   const token = btoa(binaryString)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
   
-  if (DEBUG) {
-    console.log('🔐 Token generated:', {
-      url: url.substring(0, 50) + '...',
-      timestamp,
-      tokenLength: token.length
-    });
-  }
+  console.log('🔐 Token generated:', {
+    url: url.substring(0, 50) + '...',
+    timestamp,
+    token: token.substring(0, 20) + '...',
+    tokenLength: token.length
+  });
   
   return token;
 }
 
 /**
  * Get proxied URL for stream
- * CRITICAL: Properly detects stream types and adds authentication
  */
 export function getProxiedUrl(originalUrl: string): string {
   if (!originalUrl) {
-    console.error('❌ No URL provided to proxy');
+    console.error('❌ No URL provided');
     return originalUrl;
   }
 
   if (!API_KEY) {
-    console.error('❌ VITE_API_KEY is not configured in .env file!');
+    console.error('❌ VITE_API_KEY not configured');
     return originalUrl;
   }
   
@@ -78,42 +72,36 @@ export function getProxiedUrl(originalUrl: string): string {
         cleanUrl = decodeURIComponent(encodedUrl);
       }
     } catch (e) {
-      console.error('Error parsing proxied URL:', e);
+      // Keep original URL
     }
   }
   
   const urlLower = cleanUrl.toLowerCase();
   
-  // CRITICAL: Comprehensive stream detection
+  // Check if needs proxy
   const needsProxy = 
     urlLower.includes('.m3u8') || 
     urlLower.includes('.m3u') ||
     urlLower.includes('/hls/') ||
-    urlLower.includes('hls') ||
     urlLower.includes('.mpd') ||
-    urlLower.includes('/dash/') ||
-    urlLower.includes('playlist') ||
-    urlLower.includes('master') ||
-    cleanUrl.includes('|Referer=') ||
-    cleanUrl.includes('|referer=');
+    cleanUrl.includes('|Referer=');
   
   if (needsProxy) {
     const token = generateToken(cleanUrl);
     
     if (!token) {
-      console.error('❌ Failed to generate token');
+      console.error('❌ Token generation failed');
       return cleanUrl;
     }
     
     // Build proxied URL
     const proxiedUrl = `${PROXY_URL}?url=${encodeURIComponent(cleanUrl)}&token=${token}`;
     
-    if (DEBUG) {
-      console.log('✅ Proxying stream:', {
-        original: cleanUrl.substring(0, 50) + '...',
-        proxied: proxiedUrl.substring(0, 50) + '...'
-      });
-    }
+    console.log('✅ URL proxied:', {
+      original: cleanUrl.substring(0, 50) + '...',
+      proxied: proxiedUrl.substring(0, 80) + '...',
+      hasToken: proxiedUrl.includes('token=')
+    });
     
     return proxiedUrl;
   }
@@ -122,8 +110,39 @@ export function getProxiedUrl(originalUrl: string): string {
 }
 
 /**
- * Validate stream URL format
+ * Test token generation (for debugging)
  */
+export function testTokenGeneration(url: string = 'https://example.com/test.m3u8') {
+  console.log('🧪 Testing token generation...');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  if (!API_KEY) {
+    console.error('❌ API_KEY not set!');
+    return;
+  }
+  
+  console.log('✅ API_KEY:', API_KEY.substring(0, 20) + '...');
+  console.log('✅ Test URL:', url);
+  
+  const token = generateToken(url);
+  console.log('✅ Generated Token:', token);
+  console.log('✅ Token Length:', token.length);
+  
+  const proxied = getProxiedUrl(url);
+  console.log('✅ Proxied URL:', proxied);
+  
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  return { token, proxied };
+}
+
+// Export test function to window
+if (typeof window !== 'undefined') {
+  (window as any).testTokenGeneration = testTokenGeneration;
+  console.log('💡 Test available: window.testTokenGeneration()');
+}
+
+// Validate stream URL
 export function isValidStreamUrl(url: string): boolean {
   if (!url) return false;
   
@@ -135,9 +154,7 @@ export function isValidStreamUrl(url: string): boolean {
       urlLower.includes('.m3u8') ||
       urlLower.includes('.m3u') ||
       urlLower.includes('.mpd') ||
-      urlLower.includes('.mp4') ||
-      urlLower.includes('hls') ||
-      urlLower.includes('dash');
+      urlLower.includes('.mp4');
     
     return isSupported && (urlObj.protocol === 'http:' || urlObj.protocol === 'https:');
   } catch (e) {
@@ -145,13 +162,10 @@ export function isValidStreamUrl(url: string): boolean {
   }
 }
 
-/**
- * Get stream type from URL
- */
+// Get stream type
 export function getStreamType(url: string): 'hls' | 'dash' | 'mp4' | 'unknown' {
   const urlLower = url.toLowerCase();
   
-  // Check for proxy URLs first
   if (urlLower.includes('/api/m3u8-proxy')) {
     try {
       const urlObj = new URL(url, window.location.origin);
@@ -160,7 +174,7 @@ export function getStreamType(url: string): 'hls' | 'dash' | 'mp4' | 'unknown' {
         return getStreamType(decodeURIComponent(targetUrl));
       }
     } catch (e) {
-      // Continue with original URL check
+      // Continue
     }
   }
   
@@ -177,10 +191,4 @@ export function getStreamType(url: string): 'hls' | 'dash' | 'mp4' | 'unknown' {
   }
   
   return 'unknown';
-}
-
-// Auto-warn if API key is not set
-if (!API_KEY && typeof window !== 'undefined') {
-  console.warn('⚠️ VITE_API_KEY is not set - streaming will not work!');
-  console.warn('💡 Add VITE_API_KEY to your .env file');
 }
