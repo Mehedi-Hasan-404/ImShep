@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts - OPTIMIZED VERSION WITH TOKEN AUTH
+// api/m3u8-proxy.ts - COMPLETELY FIXED VERSION
 export const config = {
   runtime: 'edge',
 };
@@ -8,42 +8,69 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['https://imshep.vercel.app'];
 
-// Simple XOR cipher for token generation
+// CRITICAL FIX: Match client-side token generation exactly
 function generateToken(url: string): string {
   const key = API_KEY.substring(0, 16);
   const timestamp = Math.floor(Date.now() / 60000); // 1-minute buckets
   const data = `${url}:${timestamp}`;
   
-  let encoded = '';
-  for (let i = 0; i < data.length; i++) {
-    encoded += String.fromCharCode(data.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  // Convert to bytes for XOR
+  const encoder = new TextEncoder();
+  const dataBytes = encoder.encode(data);
+  const keyBytes = encoder.encode(key);
+  
+  // XOR cipher
+  const encoded = new Uint8Array(dataBytes.length);
+  for (let i = 0; i < dataBytes.length; i++) {
+    encoded[i] = dataBytes[i] ^ keyBytes[i % keyBytes.length];
   }
   
-  return Buffer.from(encoded).toString('base64')
+  // Convert to base64 - use Buffer for Node.js compatibility
+  const binaryString = String.fromCharCode(...encoded);
+  const token = Buffer.from(binaryString, 'binary').toString('base64')
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
+  
+  return token;
 }
 
 function verifyToken(token: string, url: string): boolean {
   try {
     const key = API_KEY.substring(0, 16);
-    const decoded = Buffer.from(
-      token.replace(/-/g, '+').replace(/_/g, '/'),
-      'base64'
-    ).toString('latin1'); // <-- FIX: Decode as latin1 to match client's btoa()
     
-    let original = '';
+    // Decode base64 token
+    const base64 = token.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = Buffer.from(base64, 'base64');
+    
+    // XOR decrypt
+    const keyBytes = new TextEncoder().encode(key);
+    const original = new Uint8Array(decoded.length);
     for (let i = 0; i < decoded.length; i++) {
-      original += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      original[i] = decoded[i] ^ keyBytes[i % keyBytes.length];
     }
     
-    const [tokenUrl, tokenTime] = original.split(':');
+    // Convert back to string
+    const originalString = new TextDecoder().decode(original);
+    const [tokenUrl, tokenTime] = originalString.split(':');
     const currentTime = Math.floor(Date.now() / 60000);
     
     // Token valid for 5 minutes
-    return tokenUrl === url && Math.abs(currentTime - parseInt(tokenTime)) <= 5;
-  } catch {
+    const isValid = tokenUrl === url && Math.abs(currentTime - parseInt(tokenTime)) <= 5;
+    
+    if (!isValid) {
+      console.log('❌ Token validation failed:', {
+        tokenUrl: tokenUrl?.substring(0, 50),
+        expectedUrl: url?.substring(0, 50),
+        tokenTime,
+        currentTime,
+        timeDiff: Math.abs(currentTime - parseInt(tokenTime))
+      });
+    }
+    
+    return isValid;
+  } catch (error) {
+    console.error('❌ Token verification error:', error);
     return false;
   }
 }
@@ -77,6 +104,7 @@ export default async function handler(request: Request) {
   const targetUrl = url.searchParams.get('url');
   
   if (!targetUrl) {
+    console.error('❌ Missing url parameter');
     return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
       status: 400,
       headers: {
@@ -97,6 +125,8 @@ export default async function handler(request: Request) {
       }
     });
   }
+
+  console.log(`✅ Token verified for ${targetUrl.substring(0, 50)}...`);
 
   try {
     // Extract referer if present
@@ -124,6 +154,8 @@ export default async function handler(request: Request) {
     }
     
     const cleanTargetUrl = refererParam ? targetUrlObj.toString() : targetUrl;
+
+    console.log(`📡 Fetching: ${cleanTargetUrl.substring(0, 100)}...`);
 
     // Fetch with timeout
     const controller = new AbortController();
@@ -154,6 +186,8 @@ export default async function handler(request: Request) {
 
     // Handle M3U8 playlists - OPTIMIZED
     if (contentType.includes('mpegurl') || contentType.includes('m3u') || targetUrl.includes('.m3u8')) {
+      console.log(`📺 Processing M3U8 playlist: ${cleanTargetUrl.substring(0, 50)}...`);
+      
       const text = await response.text();
       const baseUrl = new URL(cleanTargetUrl);
       
@@ -194,17 +228,21 @@ export default async function handler(request: Request) {
         rewrittenLines.push(proxiedUrl);
       }
 
+      console.log(`✅ M3U8 playlist processed: ${rewrittenLines.length} lines`);
+
       return new Response(rewrittenLines.join('\n'), {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.apple.mpegurl',
-          'Cache-Control': 'public, max-age=10, s-maxage=10', // Reduced cache time
+          'Cache-Control': 'public, max-age=10, s-maxage=10',
           ...getCorsHeaders(origin),
         },
       });
     }
 
     // Pass through other content (video segments, etc.)
+    console.log(`📦 Passing through content: ${contentType}`);
+    
     const headers = new Headers(getCorsHeaders(origin));
     if (contentType) headers.set('Content-Type', contentType);
     
