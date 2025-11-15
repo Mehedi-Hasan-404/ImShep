@@ -16,7 +16,6 @@ const Favorites = lazy(() => import("@/pages/Favorites"));
 const CategoryChannels = lazy(() => import("@/pages/CategoryChannels"));
 const ChannelPlayer = lazy(() => import("@/pages/ChannelPlayer"));
 const Admin = lazy(() => import("@/pages/Admin"));
-const StreamTest = lazy(() => import("@/pages/StreamTest")); // NEW
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -53,10 +52,6 @@ const App = () => (
                     {(params: { channelId: string } | undefined) => 
                       <Layout><ChannelPlayer channelId={params?.channelId ?? ""} /></Layout>
                     }
-                  </Route>
-                  {/* NEW: Stream Test Route */}
-                  <Route path="/test">
-                    <Layout><StreamTest /></Layout>
                   </Route>
                   <Route path="/admin">
                     <Admin />
