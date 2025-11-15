@@ -67,6 +67,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const [sheetDragY, setSheetDragY] = useState(0);
   const touchStartYRef = useRef<number | null>(null);
+
   const [playerState, setPlayerState] = useState({
     isPlaying: false,
     isMuted: muted,
@@ -90,71 +91,70 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-  // --- START: CORRECTED FUNCTION ---
-  // This function replaces the buggy version from the original file
-  const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
-    let cleanUrl = url;
-    let drmInfo = null;
+  // CRITICAL FIX: Paste this function into VideoPlayer.tsx to replace the existing detectStreamType function
+
+const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
+  let cleanUrl = url;
+  let drmInfo = null;
+  
+  // Handle DRM parameters
+  if (url.includes('?|')) {
+    const [baseUrl, drmParams] = url.split('?|');
+    cleanUrl = baseUrl;
     
-    // Handle DRM parameters
-    if (url.includes('?|')) {
-      const [baseUrl, drmParams] = url.split('?|');
-      cleanUrl = baseUrl;
+    if (drmParams) {
+      const params = new URLSearchParams(drmParams);
+      const drmScheme = params.get('drmScheme');
+      const drmLicense = params.get('drmLicense');
+      const token = params.get('token') || params.get('authToken');
       
-      if (drmParams) {
-        const params = new URLSearchParams(drmParams);
-        const drmScheme = params.get('drmScheme');
-        const drmLicense = params.get('drmLicense');
-        const token = params.get('token') || params.get('authToken');
-        
-        if (drmScheme && drmLicense) {
-          drmInfo = { scheme: drmScheme, license: drmLicense, token };
-        } else if (token) {
-          drmInfo = { token };
-        }
+      if (drmScheme && drmLicense) {
+        drmInfo = { scheme: drmScheme, license: drmLicense, token };
+      } else if (token) {
+        drmInfo = { token };
       }
     }
+  }
 
-    const urlLower = cleanUrl.toLowerCase();
-    
-    // CRITICAL FIX: Check for HLS (ADDED proxy check)
-    if (urlLower.includes('.m3u8') || 
-        urlLower.includes('/hls/') ||
-        urlLower.includes('hls') ||
-        urlLower.includes('/api/m3u8-proxy') || // <-- MOVED HERE
-        url.includes('/api/m3u8-proxy')) { // <-- MOVED HERE
-      console.log('汐 Detected HLS stream (or proxy):', cleanUrl);
-      return { type: 'hls', cleanUrl, drmInfo };
-    }
-    
-    // CRITICAL FIX: Check for DASH (REMOVED proxy check)
-    if (urlLower.includes('.mpd') || 
-        urlLower.includes('/dash/') || 
-        urlLower.includes('dash')) { 
-      console.log('汐 Detected DASH stream:', cleanUrl);
-      return { type: 'dash', cleanUrl, drmInfo };
-    }
-
-    // Check for native video formats
-    if (urlLower.includes('.mp4') || 
-        urlLower.includes('.webm') || 
-        urlLower.includes('.mov')) {
-      console.log('汐 Detected native video stream:', cleanUrl);
-      return { type: 'native', cleanUrl, drmInfo };
-    }
-    
-    // Check for manifest (could be DASH)
-    if (urlLower.includes('manifest') || drmInfo) {
-      console.log('汐 Detected manifest/DRM stream, using DASH:', cleanUrl);
-      return { type: 'dash', cleanUrl, drmInfo };
-    }
-    
-    // CRITICAL FIX: Default to HLS instead of DASH
-    // Most IPTV streams are HLS, so this is a safer default
-    console.warn('裾 Unknown stream type, defaulting to HLS:', cleanUrl);
+  const urlLower = cleanUrl.toLowerCase();
+  
+  // CRITICAL FIX: Check for M3U8 FIRST (highest priority)
+  // This includes both direct .m3u8 URLs and proxy URLs
+  if (urlLower.includes('.m3u8') || 
+      urlLower.includes('/hls/') || 
+      urlLower.includes('hls') || 
+      urlLower.includes('/api/m3u8-proxy')) {
+    console.log('🎬 Detected HLS stream:', cleanUrl);
     return { type: 'hls', cleanUrl, drmInfo };
-  }, []);
-  // --- END: CORRECTED FUNCTION ---
+  }
+  
+  // Check for DASH
+  if (urlLower.includes('.mpd') || 
+      urlLower.includes('/dash/') || 
+      urlLower.includes('dash')) {
+    console.log('🎬 Detected DASH stream:', cleanUrl);
+    return { type: 'dash', cleanUrl, drmInfo };
+  }
+
+  // Check for native video formats
+  if (urlLower.includes('.mp4') || 
+      urlLower.includes('.webm') || 
+      urlLower.includes('.mov')) {
+    console.log('🎬 Detected native video stream:', cleanUrl);
+    return { type: 'native', cleanUrl, drmInfo };
+  }
+  
+  // Check for manifest (could be DASH)
+  if (urlLower.includes('manifest') || drmInfo) {
+    console.log('🎬 Detected manifest/DRM stream, using DASH:', cleanUrl);
+    return { type: 'dash', cleanUrl, drmInfo };
+  }
+  
+  // CRITICAL FIX: Default to HLS instead of DASH
+  // Most IPTV streams are HLS, so this is a safer default
+  console.warn('⚠️ Unknown stream type, defaulting to HLS:', cleanUrl);
+  return { type: 'hls', cleanUrl, drmInfo };
+}, []);
 
   const destroyPlayer = useCallback(() => {
     if (hlsRef.current) {
@@ -215,7 +215,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     try {
       const { type, cleanUrl, drmInfo } = detectStreamType(streamUrl);
       if (type === 'dash') {
-         playerTypeRef.current = 'shaka';
+        playerTypeRef.current = 'shaka';
         await initShakaPlayer(cleanUrl, video, drmInfo);
       } else if (type === 'hls') {
         playerTypeRef.current = 'hls';
@@ -230,121 +230,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [streamUrl, autoPlay, muted, destroyPlayer, detectStreamType]);
 
-  // --- START: REPLACED FUNCTION (OPTIMIZED HLS CONFIG) ---
   const initHlsPlayer = async (url: string, video: HTMLVideoElement) => {
     try {
       const Hls = (await import('hls.js')).default;
       if (Hls && Hls.isSupported()) {
-        const hls = new Hls({ 
-          enableWorker: true,
-          debug: false,
-          
-          // CRITICAL: Aggressive performance settings
-          lowLatencyMode: true,
-          backBufferLength: 90,
-          
-          // CRITICAL: Fast startup
-          maxBufferLength: 10,              // Reduced from 30
-          maxMaxBufferLength: 30,            // Reduced from 600
-          maxBufferSize: 20 * 1000 * 1000,  // Reduced to 20MB
-          maxBufferHole: 0.5,
-  
-          // CRITICAL: Instant loading
-          fragLoadingTimeOut: 3000,          // Faster timeout
-          manifestLoadingTimeOut: 3000,      // Faster timeout
-          fragLoadingMaxRetry: 2,            // Fewer retries initially
-          manifestLoadingMaxRetry: 2,
-          fragLoadingRetryDelay: 500,        // Faster retry
-          manifestLoadingRetryDelay: 500,
-          
-          // CRITICAL: Instant start
-          maxFragLookUpTolerance: 0.1,       // Tighter tolerance
-          liveSyncDurationCount: 2,
-          liveMaxLatencyDurationCount: 5,    // Lower latency
-          
-          // CRITICAL: Progressive loading
-          startLevel: -1,                    // Auto-select
-          startPosition: -1,
-          capLevelToPlayerSize: true,        // Optimize for screen
-          
-          // CRITICAL: Aggressive preloading
-          maxLoadingDelay: 1,                // Start loading immediately
-          
-          // CRITICAL: Network optimizations
-          manifestLoadPolicy: {
-            default: {
-              maxTimeToFirstByteMs: 2000,    // Fast initial response
-              maxLoadTimeMs: 5000,            // Quick timeout
-              timeoutRetry: {
-                maxNumRetry: 1,
-                retryDelayMs: 0,
-                maxRetryDelayMs: 0,
-              },
-              errorRetry: {
-                maxNumRetry: 2,
-                retryDelayMs: 500,
-                maxRetryDelayMs: 1000,
-              },
-            },
-          },
-          
-          playlistLoadPolicy: {
-            default: {
-              maxTimeToFirstByteMs: 2000,
-              maxLoadTimeMs: 5000,
-              timeoutRetry: {
-                maxNumRetry: 1,
-                retryDelayMs: 0,
-                maxRetryDelayMs: 0,
-              },
-              errorRetry: {
-                maxNumRetry: 2,
-                retryDelayMs: 500,
-                maxRetryDelayMs: 1000,
-              },
-            },
-          },
-          
-          fragLoadPolicy: {
-            default: {
-              maxTimeToFirstByteMs: 2000,
-              maxLoadTimeMs: 5000,
-              timeoutRetry: {
-                maxNumRetry: 1,
-                retryDelayMs: 0,
-                maxRetryDelayMs: 0,
-              },
-              errorRetry: {
-                maxNumRetry: 2,
-                retryDelayMs: 500,
-                maxRetryDelayMs: 1000,
-              },
-            },
-          },
-          
-          // Note: The xhrSetup from the original function was not in the new config.
-          // If you need to add back the X-API-Key header, you can add it here like so:
-          // xhrSetup: (xhr: XMLHttpRequest) => {
-          //   const apiKey = import.meta.env.VITE_API_KEY;
-          //   if (apiKey) {
-          //     xhr.setRequestHeader('X-API-Key', apiKey);
-          //   }
-          // }
-        });
-
+        const hls = new Hls({ enableWorker: true, debug: false, capLevelToPlayerSize: true, maxLoadingDelay: 1, maxBufferLength: 15, maxBufferSize: 20 * 1000 * 1000, fragLoadingTimeOut: 8000, manifestLoadingTimeOut: 4000, startLevel: -1, startPosition: -1, xhrSetup: (xhr: XMLHttpRequest) => {
+    const apiKey = import.meta.env.VITE_API_KEY;
+    if (apiKey) {
+      xhr.setRequestHeader('X-API-Key', apiKey);
+    }
+        } });
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
-        
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (!isMountedRef.current) return;
           if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-          
-          const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ 
-            height: level.height || 0, 
-            bitrate: Math.round(level.bitrate / 1000), 
-            id: index 
-          }));
+          const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ height: level.height || 0, bitrate: Math.round(level.bitrate / 1000), id: index }));
           
           let audioTracks: AudioTrack[] = [];
           if (hls.audioTracks && hls.audioTracks.length > 0) {
@@ -358,15 +260,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
           
           video.muted = muted;
-          
-          // CRITICAL: Instant playback attempt
-          if (autoPlay) {
-            video.play().catch(() => {});
-          }
+          if (autoPlay) video.play().catch(console.warn);
 
+          // FIX: Correctly detect DVR (VOD) streams vs. true Live
           const duration = video.duration;
           const isLive = (hls.liveSyncPosition !== null) && (!isFinite(duration) || duration === 0);
-
+          
           setPlayerState(prev => ({ 
             ...prev, 
             isLoading: false, 
@@ -384,34 +283,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           updateCurrentQualityHeight();
           startControlsTimer();
         });
-        
-        // CRITICAL: Hide loading on first frame
-        hls.on(Hls.Events.FRAG_LOADED, () => {
-          if (playerState.isLoading) {
-            setPlayerState(prev => ({ ...prev, isLoading: false }));
-          }
-        });
-
         hls.on(Hls.Events.LEVEL_SWITCHED, () => {
           updateCurrentQualityHeight();
         });
-
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!isMountedRef.current) return;
           if (data.fatal) {
             if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
             switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR: 
-                hls.startLoad(); 
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR: 
-                hls.recoverMediaError(); 
-                break;
+              case Hls.ErrorTypes.NETWORK_ERROR: hls.startLoad(); break;
+              case Hls.ErrorTypes.MEDIA_ERROR: hls.recoverMediaError(); break;
               default: 
                 setPlayerState(prev => ({ 
                   ...prev, 
                   isLoading: false, 
-                  error: `Playback Error: ${data.details}`,
+                  error: `HLS Error: ${data.details}`,
                   showControls: false 
                 })); 
                 destroyPlayer(); 
@@ -424,13 +310,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } else {
         throw new Error('HLS is not supported in this browser');
       }
-    } catch (error) { 
-      throw error; 
-    }
+    } catch (error) { throw error; }
   };
-  // --- END: REPLACED FUNCTION ---
-
- const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
+  
+  const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
     try {
       // FIX: Use static import of Shaka Player
       if (shaka.polyfill) {
@@ -441,11 +324,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (!Player || !Player.isBrowserSupported()) {
         throw new Error('This browser is not supported by Shaka Player');
       }
-
       if (shakaPlayerRef.current) await shakaPlayerRef.current.destroy();
       const player = new Player(video);
       shakaPlayerRef.current = player;
-
       player.configure({ 
         streaming: { 
           bufferingGoal: 15, 
@@ -477,10 +358,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           advanced: {},
         },
         networking: {
-          requestFilter: drmInfo && drmInfo.token ?
-            (type: any, request: any) => {
-              request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
-            } : undefined,
+          requestFilter: drmInfo && drmInfo.token ? (type: any, request: any) => {
+            request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
+          } : undefined,
         },
       });
 
@@ -523,30 +403,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed - check live config';
         else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error - verify keys/token';
         else if (errorCode === 1003) errorMessage = 'No playable streams - invalid MPD';
-
         setPlayerState(prev => ({ 
           ...prev, 
           isLoading: false, 
           error: errorMessage, 
           showControls: false 
         }));
-
         if (errorCode >= 6000 && errorCode < 7000) {
           setTimeout(() => handleRetry(), 2000);
         }
         destroyPlayer();
       };
       player.addEventListener('error', onError);
-
       await player.load(url);
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-
       const tracks = player.getVariantTracks();
       const qualities: QualityLevel[] = tracks.map(track => ({ height: track.height || 0, bitrate: Math.round(track.bandwidth / 1000), id: track.id }));
-
       const textTracks = player.getTextTracks();
       const subtitles: SubtitleTrack[] = textTracks.map(track => ({ id: track.id.toString(), label: track.label || track.language || 'Unknown', language: track.language || 'unknown' }));
-
+      
       let audioTracks: AudioTrack[] = [];
       const audioInfos = player.getAudioLanguagesAndRoles();
       if (audioInfos && audioInfos.length > 0) {
@@ -575,7 +450,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // FIX: Correctly detect DVR (VOD) streams vs. true Live
       const duration = video.duration;
       const isLive = player.isLive() && (!isFinite(duration) || duration === 0);
-
+      
       setPlayerState(prev => ({ 
         ...prev, 
         isLoading: false, 
@@ -595,7 +470,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       startControlsTimer();
       return () => player.removeEventListener('error', onError);
     } catch (error) { 
-      throw error;
+      throw error; 
     }
   };
 
@@ -625,7 +500,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       updateCurrentQualityHeight();
       startControlsTimer();
     };
-
     const onError = () => {
       if (!isMountedRef.current) return;
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
@@ -636,16 +510,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         showControls: false,
       }));
     };
-
     video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
     video.addEventListener('error', onError, { once: true });
-
     return () => {
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('error', onError);
     };
   };
-
+  
   const formatTime = (time: number): string => {
     if (!isFinite(time) || time <= 0) return "0:00";
     const hours = Math.floor(time / 3600);
@@ -654,7 +526,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
-
+  
   const changeQuality = useCallback((qualityId: number) => {
     if (playerTypeRef.current === 'hls' && hlsRef.current) {
       hlsRef.current.currentLevel = qualityId;
@@ -738,7 +610,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }, CONTROLS_HIDE_DELAY);
     }
   }, [playerState.isPlaying, playerState.showSettings, playerState.isSeeking]);
-
+  
   useEffect(() => {
     isMountedRef.current = true;
     initializePlayer();
@@ -753,7 +625,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-
     const handlePlay = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPlaying: true })); lastActivityRef.current = Date.now(); };
     const handlePause = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPlaying: false })); lastActivityRef.current = Date.now(); };
     const handleWaiting = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: true })); };
@@ -763,28 +634,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handleEnterPip = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPipActive: true })); };
     const handleLeavePip = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPipActive: false })); };
     const handleFullscreenChange = () => { if (!isMountedRef.current) return; const isFullscreen = !!document.fullscreenElement; setPlayerState(prev => ({ ...prev, isFullscreen })); if (isFullscreen) resetControlsTimer(); };
-
-    video.addEventListener('play', handlePlay);
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('waiting', handleWaiting);
-    video.addEventListener('playing', handlePlaying);
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('volumechange', handleVolumeChange);
-    video.addEventListener('enterpictureinpicture', handleEnterPip);
-    video.addEventListener('leavepictureinpicture', handleLeavePip);
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    return () => {
-      video.removeEventListener('play', handlePlay);
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('waiting', handleWaiting);
-      video.removeEventListener('playing', handlePlaying);
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('volumechange', handleVolumeChange);
-      video.removeEventListener('enterpictureinpicture', handleEnterPip);
-      video.removeEventListener('leavepictureinpicture', handleLeavePip);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
+    video.addEventListener('play', handlePlay); video.addEventListener('pause', handlePause); video.addEventListener('waiting', handleWaiting); video.addEventListener('playing', handlePlaying); video.addEventListener('timeupdate', handleTimeUpdate); video.addEventListener('volumechange', handleVolumeChange); video.addEventListener('enterpictureinpicture', handleEnterPip); video.addEventListener('leavepictureinpicture', handleLeavePip); document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => { video.removeEventListener('play', handlePlay); video.removeEventListener('pause', handlePause); video.removeEventListener('waiting', handleWaiting); video.removeEventListener('playing', handlePlaying); video.removeEventListener('timeupdate', handleTimeUpdate); video.removeEventListener('volumechange', handleVolumeChange); video.removeEventListener('enterpictureinpicture', handleEnterPip); video.removeEventListener('leavepictureinpicture', handleLeavePip); document.removeEventListener('fullscreenchange', handleFullscreenChange); };
   }, [playerState.isSeeking, resetControlsTimer]);
 
   useEffect(() => {
@@ -849,32 +700,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const calculateNewTime = useCallback((clientX: number): number | null => {
-    const video = videoRef.current;
-    const progressBar = progressRef.current;
-    if (!video || !progressBar || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return null;
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
-    const percentage = clickX / rect.width;
-    return percentage * video.duration;
+    const video = videoRef.current; const progressBar = progressRef.current; if (!video || !progressBar || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return null; const rect = progressBar.getBoundingClientRect(); const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width)); const percentage = clickX / rect.width; return percentage * video.duration;
   }, [playerState.isLive]);
-
+  
   const throttledUpdate = useCallback((updateFn: () => void) => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(updateFn);
   }, []);
-
+  
   // FIX: REMOVED e.preventDefault() to allow mouseup to fire
   const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    const video = videoRef.current;
-    if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return;
-    wasPlayingBeforeSeekRef.current = !video.paused;
-    dragStartRef.current = { isDragging: true };
-    setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true }));
-    video.pause();
-    lastActivityRef.current = Date.now();
+    e.stopPropagation(); const video = videoRef.current; if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
-
+  
   const handleDragMove = useCallback((e: MouseEvent) => {
     if (!dragStartRef.current?.isDragging) return; 
     e.preventDefault(); // Prevent page scroll
@@ -887,7 +725,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       lastActivityRef.current = Date.now();
     });
   }, [calculateNewTime, throttledUpdate]);
-
+  
   const handleDragEnd = useCallback(() => {
     if (!dragStartRef.current?.isDragging) return; 
     const video = videoRef.current; 
@@ -900,14 +738,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     lastActivityRef.current = Date.now();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
-
+  
   const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const newTime = calculateNewTime(e.clientX);
-    if (newTime !== null && videoRef.current) videoRef.current.currentTime = newTime;
-    setPlayerState(prev => ({ ...prev, showControls: true }));
-    lastActivityRef.current = Date.now();
+    const newTime = calculateNewTime(e.clientX); if (newTime !== null && videoRef.current) videoRef.current.currentTime = newTime; setPlayerState(prev => ({ ...prev, showControls: true })); lastActivityRef.current = Date.now();
   }, [calculateNewTime]);
-
+  
   // FIX: REMOVED e.preventDefault() to allow touchend to fire
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.stopPropagation();
@@ -946,7 +781,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPlayerState(prev => ({ ...prev, isSeeking: false, isPlaying: !videoRef.current?.paused }));
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
-
+  
   // FIX: Simplified logic to correctly handle play/pause for all player types
   const togglePlay = useCallback(() => {
     const video = videoRef.current; 
@@ -961,7 +796,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPlayerState(prev => ({ ...prev, showControls: true })); 
     lastActivityRef.current = Date.now();
   }, []);
-
+  
   // REVERT: Reverted to the original code. The 'volumechange' listener will handle the state update.
   const toggleMute = useCallback(() => {
     const video = videoRef.current; 
@@ -1221,7 +1056,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const sizes = getControlSizes();
-
+  
   return (
     <div ref={containerRef} className={`relative bg-black w-full h-full ${className}`} onMouseMove={handleMouseMove} onClick={handlePlayerClick}>
       <video ref={videoRef} className="w-full h-full object-contain" playsInline controls={false} />
@@ -1251,7 +1086,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       
       {!playerState.error && (
         <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 transition-opacity duration-300 ${playerState.showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-          
           {isMobile && (
             <div className="absolute top-4 right-4 z-10">
               <button 
@@ -1297,7 +1131,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
             
             <div className={`flex items-center ${sizes.gapClass} flex-nowrap flex-1 min-h-[40px]`}>
-            
               {!isMobile && (
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-wrap`}>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -1310,8 +1143,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </button>
                     
                     {/* FIX FOR DESKTOP VOLUME SLIDER: 
-                        Replaced all broken Tailwind classes with the single CSS class 'volume-slider-horizontal' 
-                        to show the "white marked area" (the track)
+                      Replaced all broken Tailwind classes with the single CSS class 'volume-slider-horizontal' 
+                      to show the "white marked area" (the track)
                     */}
                     <input
                       type="range"
@@ -1455,16 +1288,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                   {/* FIX FOR MOBILE CONTROLS OVERFLOW: Right group (added flex-shrink-0) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}>
-                  
-                     {document.pictureInPictureEnabled && (
+                    {document.pictureInPictureEnabled && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); togglePip(); }} 
                         className={`text-white hover:text-blue-300 transition-colors ${sizes.paddingClass} flex-shrink-0`}
-                       title="Picture-in-picture"
+                        title="Picture-in-picture"
                         data-testid="button-pip-mobile"
                       >
                         <PictureInPicture2 size={sizes.iconSmall} />
-                     </button>
+                      </button>
                     )}
                     
                     <button 
@@ -1527,7 +1359,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </button>
                   
-                   <button
+                  <button
                     onClick={() => handleSettingClick('more')}
                     className="w-full flex items-center justify-between px-4 py-3 text-white hover:bg-white/10 transition-colors"
                   >
@@ -1606,7 +1438,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       onClick={() => handleSettingClick('captions')}
                       className="w-full flex items-center justify-between px-12 py-2 text-sm text-white hover:bg-white/10 transition-colors"
                     >
-                     <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3">
                         <Subtitles size={16} />
                         <span>Captions</span>
                       </div>
@@ -1619,7 +1451,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className="w-full flex items-center justify-between px-12 py-2 text-sm text-white hover:bg-white/10 transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                       <Music size={16} />
+                      <Music size={16} />
                       <span>Audio</span>
                     </div>
                     <ChevronRight size={14} className="text-white/70" />
@@ -1682,7 +1514,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <div className="px-12 py-2 text-xs text-white/50">
                       No audio tracks available
                     </div>
-                   )}
+                  )}
                 </div>
               ) : null}
             </div>
@@ -1743,7 +1575,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           <span style={{ fontSize: '15px', fontWeight: 400 }}>Subtitles</span>
                         </div>
                         <div className="flex items-center gap-2">
-                           <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
+                          <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>
                             {playerState.currentSubtitle === '' ? 'Off' : playerState.availableSubtitles.find(s => s.id === playerState.currentSubtitle)?.label || 'Off'}
                           </span>
                           <ChevronRight size={16} className="text-white/70" />
@@ -1780,7 +1612,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           {getCurrentSpeedLabel()}
                         </span>
                         <ChevronRight size={16} className="text-white/70" />
-                       </div>
+                      </div>
                     </button>
                   </>
                 ) : expandedSettingItem === 'quality' ? (
@@ -1792,7 +1624,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Quality</span>
                     </button>
-                    
                     <button
                       onClick={() => { changeQuality(-1); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
@@ -1824,7 +1655,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Playback speed</span>
                     </button>
-                    
                     {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
                       <button
                         key={speed}
@@ -1847,7 +1677,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Captions</span>
                     </button>
-                    
                     <button
                       onClick={() => { changeSubtitle(''); }}
                       className={`w-full text-left px-12 py-2 text-sm text-white transition-colors flex items-center justify-between ${
@@ -1879,7 +1708,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={18} className="rotate-180" />
                       <span className="text-sm">Audio</span>
                     </button>
-                    
                     {playerState.availableAudioTracks.length > 0 ? (
                       playerState.availableAudioTracks.map((audioTrack) => (
                         <button
@@ -1914,7 +1742,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <div className="flex justify-center pt-3 pb-2">
                 <div className="w-10 h-1 bg-white/30 rounded-full" />
               </div>
- 
               
               <div className="overflow-y-auto pb-4" style={{ maxHeight: '50vh' }}>
                 {!expandedSettingItem ? (
@@ -1957,14 +1784,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     
                     {playerState.availableSubtitles.length > 0 && (
                       <button
-                         onClick={() => handleSettingClick('captions')}
-                         className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
+                        onClick={() => handleSettingClick('captions')}
+                        className="w-full flex items-center justify-between px-8 py-4 text-white hover:bg-white/10 transition-colors"
                         style={{ minHeight: '56px' }}
                       >
                         <div className="flex items-center gap-4">
                           <Subtitles size={20} />
                           <span style={{ fontSize: '15px', fontWeight: 500 }}>Captions</span>
-                         </div>
+                        </div>
                         <ChevronRight size={16} className="text-white/70" />
                       </button>
                     )}
@@ -2002,7 +1829,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </button>
                     {playerState.availableQualities.map((quality) => (
                       <button
-                         key={quality.id}
+                        key={quality.id}
                         onClick={() => { changeQuality(quality.id); }}
                         className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
                           playerState.currentQuality === quality.id ? 'bg-white/20' : 'hover:bg-white/10'
@@ -2023,7 +1850,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Playback speed</span>
                     </button>
-                    
                     {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
                       <button
                         key={speed}
@@ -2047,7 +1873,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Captions</span>
                     </button>
-                    
                     <button
                       onClick={() => { changeSubtitle(''); }}
                       className={`w-full text-left px-14 py-3 text-white transition-colors flex items-center justify-between ${
@@ -2081,7 +1906,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <ChevronRight size={20} className="rotate-180" />
                       <span style={{ fontSize: '15px', fontWeight: 500 }}>Audio</span>
                     </button>
-                    
                     {playerState.availableAudioTracks.length > 0 ? (
                       playerState.availableAudioTracks.map((audioTrack) => (
                         <button
@@ -2097,11 +1921,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         </button>
                       ))
                     ) : (
-                       <div className="px-14 py-3 text-white/50" style={{ fontSize: '14px' }}>
+                      <div className="px-14 py-3 text-white/50" style={{ fontSize: '14px' }}>
                         No audio tracks available
                       </div>
                     )}
-                 </div>
+                  </div>
                 ) : null}
               </div>
             </div>
