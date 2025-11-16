@@ -1,4 +1,4 @@
-// src/pages/CategoryChannels.tsx - COMPLETE FIXED VERSION
+// src/pages/CategoryChannels.tsx - NO API KEY IN FRONTEND
 import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -40,27 +40,16 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
     setFilteredChannels(filtered);
   }, [searchQuery, channels]);
 
-  // Updated function with API Key and enhanced logging
   const fetchM3UPlaylistServerSide = async (
     categoryId: string, 
     categoryName: string, 
     m3uUrl: string
   ): Promise<PublicChannel[]> => {
     try {
-      const API_KEY = import.meta.env.VITE_API_KEY;
-      
-      if (!API_KEY) {
-        console.error('❌ API Key not configured');
-        throw new Error('API configuration error');
-      }
-      
-      console.log('📡 Calling parse-m3u API with origin:', window.location.origin);
-      
       const response = await fetch('/api/parse-m3u', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': API_KEY,
         },
         body: JSON.stringify({
           categoryId,
@@ -71,15 +60,13 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('❌ API Error:', errorData);
         throw new Error(errorData.error || 'Failed to fetch M3U playlist');
       }
 
       const data = await response.json();
-      console.log(`✅ API returned ${data.channels?.length || 0} channels`);
       return data.channels || [];
     } catch (error) {
-      console.error('❌ Error fetching M3U playlist:', error);
+      console.error('Error loading channels');
       throw error;
     }
   };
@@ -89,14 +76,11 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
       setLoading(true);
       setError(null);
 
-      console.log('🔍 Fetching category with slug:', slug);
-
       const categoriesRef = collection(db, 'categories');
       const categoryQuery = query(categoriesRef, where('slug', '==', slug));
       const categorySnapshot = await getDocs(categoryQuery);
 
       if (categorySnapshot.empty) {
-        console.error('❌ Category not found:', slug);
         setLoading(false);
         setLocation('/404');
         return;
@@ -104,14 +88,12 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
 
       const categoryDoc = categorySnapshot.docs[0];
       const categoryData = { id: categoryDoc.id, ...categoryDoc.data() } as Category;
-      console.log('✅ Category found:', categoryData.name);
       setCategory(categoryData);
 
       let allChannels: PublicChannel[] = [];
 
       // Fetch M3U channels via server-side API
       if (categoryData.m3uUrl) {
-        console.log('📡 Category has M3U URL, fetching playlist...');
         try {
           const m3uChannels = await fetchM3UPlaylistServerSide(
             categoryData.id,
@@ -119,16 +101,13 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
             categoryData.m3uUrl
           );
           allChannels = [...allChannels, ...m3uChannels];
-          console.log(`✅ Loaded ${m3uChannels.length} channels from M3U playlist`);
         } catch (m3uError) {
-          console.error('❌ Error loading M3U playlist:', m3uError);
           setError('Failed to load M3U playlist channels. Showing manual channels only.');
         }
       }
 
       // Fetch manual channels
       try {
-        console.log('📺 Fetching manual channels...');
         const channelsRef = collection(db, 'channels');
         const channelsQuery = query(channelsRef, where('categoryId', '==', categoryData.id));
         const channelsSnapshot = await getDocs(channelsQuery);
@@ -138,16 +117,13 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
           ...doc.data()
         })) as PublicChannel[];
 
-        console.log(`✅ Loaded ${manualChannels.length} manual channels`);
         allChannels = [...allChannels, ...manualChannels];
       } catch (firestoreError) {
-        console.error('❌ Error fetching manual channels:', firestoreError);
+        console.error('Error fetching manual channels');
       }
 
-      console.log(`📊 Total channels loaded: ${allChannels.length}`);
       setChannels(allChannels);
     } catch (generalError) {
-      console.error('❌ Error fetching category and channels:', generalError);
       setError('Failed to load channels. Please try again.');
     } finally {
       setLoading(false);
