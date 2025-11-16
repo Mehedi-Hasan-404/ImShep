@@ -1,4 +1,4 @@
-// api/m3u8-proxy.ts - SIMPLIFIED SECURE VERSION
+// api/m3u8-proxy.ts - SECURED WITH ORIGIN-ONLY VALIDATION
 export const config = {
   runtime: 'edge',
 };
@@ -14,7 +14,7 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     'Access-Control-Expose-Headers': 'Content-Length, Content-Type',
   };
@@ -32,9 +32,8 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Verify API key
-  const apiKey = request.headers.get('x-api-key') || url.searchParams.get('apiKey');
-  if (!apiKey || apiKey !== API_KEY) {
+  // SECURITY: Only check origin (no API key from client)
+  if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
     console.warn(`🚫 Unauthorized request from ${origin}`);
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
@@ -58,8 +57,6 @@ export default async function handler(request: Request) {
   }
 
   try {
-    console.log(`🔄 Proxying: ${targetUrl.substring(0, 50)}...`);
-
     // Fetch the stream
     const response = await fetch(targetUrl, {
       headers: {
@@ -69,7 +66,6 @@ export default async function handler(request: Request) {
     });
 
     if (!response.ok) {
-      console.error(`❌ Fetch failed: ${response.status}`);
       return new Response(
         JSON.stringify({ error: `Failed to fetch: ${response.status}` }),
         {
@@ -108,8 +104,8 @@ export default async function handler(request: Request) {
           absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
         }
         
-        // Return proxied URL
-        const proxiedUrl = `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}&apiKey=${apiKey}`;
+        // Return proxied URL (no API key in URL)
+        const proxiedUrl = `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}`;
         return proxiedUrl;
       }).join('\n');
 
