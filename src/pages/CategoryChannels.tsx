@@ -1,79 +1,46 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Search, Grid3x3, List, Loader2, AlertCircle } from 'lucide-react';
+// src/pages/CategoryChannels.tsx - COMPLETE FIXED VERSION
+import { useEffect, useState } from 'react';
+import { useLocation } from 'wouter';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { PublicChannel, Category } from '@/types';
+import ChannelCard from '@/components/ChannelCard';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, Tv, Search, ArrowLeft } from 'lucide-react';
 
-interface PublicChannel {
-  id: string;
-  name: string;
-  logoUrl: string;
-  streamUrl: string;
-  categoryId: string;
-  categoryName: string;
+interface CategoryChannelsProps {
+  slug: string;
 }
 
-interface Category {
-  id: string;
-  name: string;
-  m3uUrl: string;
-  enabled: boolean;
-}
-
-const CategoryChannels = () => {
-  const { categoryId } = useParams<{ categoryId: string }>();
-  const navigate = useNavigate();
-  
+const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
+  const [, setLocation] = useLocation();
   const [channels, setChannels] = useState<PublicChannel[]>([]);
-  const [filteredChannels, setFilteredChannels] = useState<PublicChannel[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [isLoading, setIsLoading] = useState(true);
+  const [category, setCategory] = useState<Category | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [categoryName, setCategoryName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredChannels, setFilteredChannels] = useState<PublicChannel[]>([]);
 
   useEffect(() => {
-    loadChannels();
-  }, [categoryId]);
-
-  useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredChannels(channels);
+    if (slug) {
+      fetchCategoryAndChannels();
     } else {
-      const query = searchQuery.toLowerCase();
-      const filtered = channels.filter(channel =>
-        channel.name.toLowerCase().includes(query)
-      );
-      setFilteredChannels(filtered);
+      setError('Invalid category slug');
+      setLoading(false);
     }
+  }, [slug]);
+
+  useEffect(() => {
+    const filtered = channels.filter(channel =>
+      channel.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredChannels(filtered);
   }, [searchQuery, channels]);
 
-  const loadChannels = async () => {
-    if (!categoryId) return;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const categories: Category[] = JSON.parse(localStorage.getItem('iptv_categories') || '[]');
-      const category = categories.find(cat => cat.id === categoryId);
-
-      if (!category) {
-        setError('Category not found');
-        setIsLoading(false);
-        return;
-      }
-
-      setCategoryName(category.name);
-      const channelsList = await fetchM3UPlaylistServerSide(categoryId, category.name, category.m3uUrl);
-      setChannels(channelsList);
-      setFilteredChannels(channelsList);
-    } catch (err) {
-      console.error('Error loading channels:', err);
-      setError('Failed to load channels. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  // Updated function with API Key and enhanced logging
   const fetchM3UPlaylistServerSide = async (
     categoryId: string, 
     categoryName: string, 
@@ -117,164 +84,167 @@ const CategoryChannels = () => {
     }
   };
 
-  const handleChannelClick = (channel: PublicChannel) => {
-    navigate(`/player/${categoryId}/${encodeURIComponent(channel.id)}`);
+  const fetchCategoryAndChannels = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      console.log('🔍 Fetching category with slug:', slug);
+
+      const categoriesRef = collection(db, 'categories');
+      const categoryQuery = query(categoriesRef, where('slug', '==', slug));
+      const categorySnapshot = await getDocs(categoryQuery);
+
+      if (categorySnapshot.empty) {
+        console.error('❌ Category not found:', slug);
+        setLoading(false);
+        setLocation('/404');
+        return;
+      }
+
+      const categoryDoc = categorySnapshot.docs[0];
+      const categoryData = { id: categoryDoc.id, ...categoryDoc.data() } as Category;
+      console.log('✅ Category found:', categoryData.name);
+      setCategory(categoryData);
+
+      let allChannels: PublicChannel[] = [];
+
+      // Fetch M3U channels via server-side API
+      if (categoryData.m3uUrl) {
+        console.log('📡 Category has M3U URL, fetching playlist...');
+        try {
+          const m3uChannels = await fetchM3UPlaylistServerSide(
+            categoryData.id,
+            categoryData.name,
+            categoryData.m3uUrl
+          );
+          allChannels = [...allChannels, ...m3uChannels];
+          console.log(`✅ Loaded ${m3uChannels.length} channels from M3U playlist`);
+        } catch (m3uError) {
+          console.error('❌ Error loading M3U playlist:', m3uError);
+          setError('Failed to load M3U playlist channels. Showing manual channels only.');
+        }
+      }
+
+      // Fetch manual channels
+      try {
+        console.log('📺 Fetching manual channels...');
+        const channelsRef = collection(db, 'channels');
+        const channelsQuery = query(channelsRef, where('categoryId', '==', categoryData.id));
+        const channelsSnapshot = await getDocs(channelsQuery);
+        
+        const manualChannels = channelsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as PublicChannel[];
+
+        console.log(`✅ Loaded ${manualChannels.length} manual channels`);
+        allChannels = [...allChannels, ...manualChannels];
+      } catch (firestoreError) {
+        console.error('❌ Error fetching manual channels:', firestoreError);
+      }
+
+      console.log(`📊 Total channels loaded: ${allChannels.length}`);
+      setChannels(allChannels);
+    } catch (generalError) {
+      console.error('❌ Error fetching category and channels:', generalError);
+      setError('Failed to load channels. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleBack = () => {
-    navigate('/');
-  };
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-400">Loading channels...</p>
+      <ErrorBoundary>
+        <div className="space-y-6">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-96" />
+          <div className="channels-grid-4 gap-4">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="aspect-video w-full" />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-3 w-1/2" />
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      </ErrorBoundary>
     );
   }
 
-  if (error) {
+  if (error || !category) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-        <div className="text-center max-w-md">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-white mb-2">Error</h2>
-          <p className="text-gray-400 mb-6">{error}</p>
-          <button
-            onClick={handleBack}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-          >
-            Go Back
-          </button>
+      <ErrorBoundary>
+        <div className="space-y-6">
+          <Button variant="ghost" className="mb-4" onClick={() => setLocation('/')} data-testid="button-back">
+            <ArrowLeft size={16} />
+            Back
+          </Button>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error || 'Category not found.'}</AlertDescription>
+          </Alert>
         </div>
-      </div>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-4 mb-4">
-            <button
-              onClick={handleBack}
-              className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </button>
-            <h1 className="text-2xl font-bold">{categoryName}</h1>
-            <span className="ml-auto text-sm text-gray-400">
-              {filteredChannels.length} channels
-            </span>
-          </div>
+    <ErrorBoundary>
+      <div className="space-y-6">
+        <Button variant="ghost" className="mb-4" onClick={() => setLocation('/')} data-testid="button-back">
+          <ArrowLeft size={16} />
+          Back
+        </Button>
 
-          {/* Search and View Controls */}
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search channels..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-lg transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                <Grid3x3 className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 rounded-lg transition-colors ${
-                  viewMode === 'list'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                <List className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Tv size={24} />
+            {category.name}
+          </h1>
+          <p className="text-text-secondary">
+            {channels.length} channel{channels.length !== 1 ? 's' : ''} available
+          </p>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        {filteredChannels.length === 0 ? (
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-text-secondary w-5 h-5" />
+          <input
+            type="text"
+            placeholder="Search channels..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="form-input pl-10"
+          />
+        </div>
+
+        {filteredChannels.length === 0 && searchQuery ? (
           <div className="text-center py-12">
-            <p className="text-gray-400 text-lg">
-              {searchQuery ? 'No channels found matching your search' : 'No channels available'}
+            <Search size={48} className="text-text-secondary mx-auto mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No channels found</h3>
+            <p className="text-text-secondary">
+              No channels match "{searchQuery}". Try a different search term.
             </p>
           </div>
-        ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {filteredChannels.map((channel) => (
-              <button
-                key={channel.id}
-                onClick={() => handleChannelClick(channel)}
-                className="group bg-gray-900 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all"
-              >
-                <div className="aspect-square bg-gray-800 flex items-center justify-center overflow-hidden">
-                  <img
-                    src={channel.logoUrl}
-                    alt={channel.name}
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = '/channel-placeholder.svg';
-                    }}
-                  />
-                </div>
-                <div className="p-3">
-                  <p className="text-sm font-medium text-white truncate group-hover:text-blue-400 transition-colors">
-                    {channel.name}
-                  </p>
-                </div>
-              </button>
-            ))}
+        ) : channels.length === 0 ? (
+          <div className="text-center py-12">
+            <Tv size={48} className="text-text-secondary mx-auto mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No Channels Available</h3>
+            <p className="text-text-secondary">
+              No channels have been added to this category yet.
+            </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {filteredChannels.map((channel) => (
-              <button
-                key={channel.id}
-                onClick={() => handleChannelClick(channel)}
-                className="w-full flex items-center gap-4 p-4 bg-gray-900 rounded-lg hover:bg-gray-800 hover:ring-2 hover:ring-blue-500 transition-all group"
-              >
-                <div className="w-16 h-16 bg-gray-800 rounded-lg flex-shrink-0 overflow-hidden">
-                  <img
-                    src={channel.logoUrl}
-                    alt={channel.name}
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = '/channel-placeholder.svg';
-                    }}
-                  />
-                </div>
-                <div className="flex-1 text-left">
-                  <p className="font-medium text-white group-hover:text-blue-400 transition-colors">
-                    {channel.name}
-                  </p>
-                </div>
-              </button>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+            {filteredChannels.map(channel => (
+              <ChannelCard key={channel.id} channel={channel} />
             ))}
           </div>
         )}
       </div>
-    </div>
+    </ErrorBoundary>
   );
 };
 
