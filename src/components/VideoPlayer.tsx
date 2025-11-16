@@ -67,7 +67,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const [sheetDragY, setSheetDragY] = useState(0);
   const touchStartYRef = useRef<number | null>(null);
-
   const [playerState, setPlayerState] = useState({
     isPlaying: false,
     isMuted: muted,
@@ -91,13 +90,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-  // CRITICAL FIX: Paste this function into VideoPlayer.tsx to replace the existing detectStreamType function
-
+// 1. UPDATE VideoPlayer.tsx - Remove URL logging from detectStreamType
 const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
   let cleanUrl = url;
   let drmInfo = null;
   
-  // Handle DRM parameters
   if (url.includes('?|')) {
     const [baseUrl, drmParams] = url.split('?|');
     cleanUrl = baseUrl;
@@ -118,41 +115,31 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
 
   const urlLower = cleanUrl.toLowerCase();
   
-  // CRITICAL FIX: Check for M3U8 FIRST (highest priority)
-  // This includes both direct .m3u8 URLs and proxy URLs
+  // SECURITY: Remove console.log that exposes URLs
   if (urlLower.includes('.m3u8') || 
       urlLower.includes('/hls/') || 
       urlLower.includes('hls') || 
       urlLower.includes('/api/m3u8-proxy')) {
-    console.log('🎬 Detected HLS stream:', cleanUrl);
     return { type: 'hls', cleanUrl, drmInfo };
   }
   
-  // Check for DASH
   if (urlLower.includes('.mpd') || 
       urlLower.includes('/dash/') || 
       urlLower.includes('dash')) {
-    console.log('🎬 Detected DASH stream:', cleanUrl);
     return { type: 'dash', cleanUrl, drmInfo };
   }
 
-  // Check for native video formats
   if (urlLower.includes('.mp4') || 
       urlLower.includes('.webm') || 
       urlLower.includes('.mov')) {
-    console.log('🎬 Detected native video stream:', cleanUrl);
     return { type: 'native', cleanUrl, drmInfo };
   }
   
-  // Check for manifest (could be DASH)
   if (urlLower.includes('manifest') || drmInfo) {
-    console.log('🎬 Detected manifest/DRM stream, using DASH:', cleanUrl);
     return { type: 'dash', cleanUrl, drmInfo };
   }
   
-  // CRITICAL FIX: Default to HLS instead of DASH
-  // Most IPTV streams are HLS, so this is a safer default
-  console.warn('⚠️ Unknown stream type, defaulting to HLS:', cleanUrl);
+  // SECURITY: No URL logging
   return { type: 'hls', cleanUrl, drmInfo };
 }, []);
 
@@ -230,249 +217,312 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     }
   }, [streamUrl, autoPlay, muted, destroyPlayer, detectStreamType]);
 
-  const initHlsPlayer = async (url: string, video: HTMLVideoElement) => {
-    try {
-      const Hls = (await import('hls.js')).default;
-      if (Hls && Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, debug: false, capLevelToPlayerSize: true, maxLoadingDelay: 1, maxBufferLength: 15, maxBufferSize: 20 * 1000 * 1000, fragLoadingTimeOut: 8000, manifestLoadingTimeOut: 4000, startLevel: -1, startPosition: -1, xhrSetup: (xhr: XMLHttpRequest) => {
-    const apiKey = import.meta.env.VITE_API_KEY;
-    if (apiKey) {
-      xhr.setRequestHeader('X-API-Key', apiKey);
-    }
-        } });
-        hlsRef.current = hls;
-        hls.loadSource(url);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (!isMountedRef.current) return;
+// 2. UPDATE initHlsPlayer - Remove error logging with URLs
+const initHlsPlayer = async (url: string, video: HTMLVideoElement) => {
+  try {
+    const Hls = (await import('hls.js')).default;
+    if (Hls && Hls.isSupported()) {
+      const hls = new Hls({ 
+        enableWorker: true, 
+        debug: false,  // SECURITY: Disable debug mode
+        capLevelToPlayerSize: true, 
+        maxLoadingDelay: 4,
+        maxBufferLength: 30,
+        maxBufferSize: 60 * 1000 * 1000,
+        fragLoadingTimeOut: 20000,
+        manifestLoadingTimeOut: 10000,
+        startLevel: -1, 
+        startPosition: -1,
+        xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+          xhr.withCredentials = false;
+          xhr.setRequestHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+        }
+      });
+      
+      hlsRef.current = hls;
+      
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!isMountedRef.current) return;
+        
+        // SECURITY: Don't log error details that might contain URLs
+        
+        if (data.fatal) {
           if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-          const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ height: level.height || 0, bitrate: Math.round(level.bitrate / 1000), id: index }));
           
-          let audioTracks: AudioTrack[] = [];
-          if (hls.audioTracks && hls.audioTracks.length > 0) {
-            audioTracks = hls.audioTracks.map((track: any, index: number) => ({
-              id: index,
-              label: track.name || track.lang || `Audio ${index + 1}`,
-              language: track.lang || 'unknown'
-            }));
-          } else {
-            audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
-          }
-          
-          video.muted = muted;
-          if (autoPlay) video.play().catch(console.warn);
-
-          // FIX: Correctly detect DVR (VOD) streams vs. true Live
-          const duration = video.duration;
-          const isLive = (hls.liveSyncPosition !== null) && (!isFinite(duration) || duration === 0);
-          
-          setPlayerState(prev => ({ 
-            ...prev, 
-            isLoading: false, 
-            error: null, 
-            availableQualities: levels, 
-            availableAudioTracks: audioTracks, 
-            currentQuality: hls.currentLevel, 
-            currentAudioTrack: hls.audioTrack || 0, 
-            isMuted: video.muted, 
-            isPlaying: true, 
-            showControls: true,
-            isLive: isLive,
-            duration: isLive ? Infinity : duration,
-          }));
-          updateCurrentQualityHeight();
-          startControlsTimer();
-        });
-        hls.on(Hls.Events.LEVEL_SWITCHED, () => {
-          updateCurrentQualityHeight();
-        });
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (!isMountedRef.current) return;
-          if (data.fatal) {
-            if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR: hls.startLoad(); break;
-              case Hls.ErrorTypes.MEDIA_ERROR: hls.recoverMediaError(); break;
-              default: 
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              if (retryCount < maxRetries) {
+                retryCount++;
+                setTimeout(() => {
+                  hls.startLoad();
+                }, 1000 * retryCount);
+              } else {
                 setPlayerState(prev => ({ 
                   ...prev, 
                   isLoading: false, 
-                  error: `HLS Error: ${data.details}`,
+                  error: 'Network error: Unable to load stream',
                   showControls: false 
-                })); 
-                destroyPlayer(); 
-                break;
-            }
-          }
-        });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        initNativePlayer(url, video);
-      } else {
-        throw new Error('HLS is not supported in this browser');
-      }
-    } catch (error) { throw error; }
-  };
-  
-  const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
-    try {
-      // FIX: Use static import of Shaka Player
-      if (shaka.polyfill) {
-        shaka.polyfill.installAll();
-      }
-      
-      const Player = shaka.Player;
-      if (!Player || !Player.isBrowserSupported()) {
-        throw new Error('This browser is not supported by Shaka Player');
-      }
-      if (shakaPlayerRef.current) await shakaPlayerRef.current.destroy();
-      const player = new Player(video);
-      shakaPlayerRef.current = player;
-      player.configure({ 
-        streaming: { 
-          bufferingGoal: 15, 
-          rebufferingGoal: 8, 
-          bufferBehind: 30,
-          retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
-          useNativeHlsOnSafari: true,
-          jumpLargeGaps: true,
-          inbandTextTracks: true,
-        },
-        manifest: {
-          retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
-          dash: {
-            clockSyncUri: '',
-            ignoreDrmInfo: false,
-            sequenceMode: true,
-            timeShiftBufferDepth: 60,
-          },
-        },
-        abr: {
-          enabled: true,
-          defaultBandwidthEstimate: 1500000,
-          bandwidthUpgradeSeconds: 5,
-          bandwidthDowngradeSeconds: 10,
-        },
-        drm: {
-          retryParameters: { timeout: 5000, maxAttempts: 2 },
-          servers: {},
-          advanced: {},
-        },
-        networking: {
-          requestFilter: drmInfo && drmInfo.token ? (type: any, request: any) => {
-            request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
-          } : undefined,
-        },
-      });
-
-      if (drmInfo) {
-        if (drmInfo.scheme === 'clearkey') {
-          if (drmInfo.license && drmInfo.license.includes(':')) {
-            const [keyId, key] = drmInfo.license.split(':');
-            player.configure({ drm: { clearKeys: { [keyId]: key } } });
-          } else if (drmInfo.token) {
-            player.configure({
-              drm: {
-                servers: { 'com.widevine.alpha': 'https://your-license-server.com/clearkey' },
-                advanced: {
-                  'com.widevine.alpha': {
-                    requestType: 1,
-                    serverCertificate: undefined,
-                  },
-                },
-              },
-            });
-            player.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
-              if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) {
-                request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
-                request.body = JSON.stringify({ kids: [], type: 'temporary' });
+                }));
+                destroyPlayer();
               }
-            });
-          }
-        } else {
-          if (drmInfo.licenseServer) {
-            player.configure({ drm: { servers: { [drmInfo.scheme]: drmInfo.licenseServer } } });
+              break;
+              
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+              
+            default:
+              setPlayerState(prev => ({ 
+                ...prev, 
+                isLoading: false, 
+                error: 'Playback error occurred',
+                showControls: false 
+              }));
+              destroyPlayer();
+              break;
           }
         }
-      }
-
-      const onError = (event: any) => {
-        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-        const errorCode = event.detail.code;
-        let errorMessage = `Stream error (${errorCode})`;
-        if (errorCode >= 6000 && errorCode < 7000) errorMessage = 'Network error - retrying...';
-        else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed - check live config';
-        else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error - verify keys/token';
-        else if (errorCode === 1003) errorMessage = 'No playable streams - invalid MPD';
-        setPlayerState(prev => ({ 
-          ...prev, 
-          isLoading: false, 
-          error: errorMessage, 
-          showControls: false 
-        }));
-        if (errorCode >= 6000 && errorCode < 7000) {
-          setTimeout(() => handleRetry(), 2000);
-        }
-        destroyPlayer();
-      };
-      player.addEventListener('error', onError);
-      await player.load(url);
-      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-      const tracks = player.getVariantTracks();
-      const qualities: QualityLevel[] = tracks.map(track => ({ height: track.height || 0, bitrate: Math.round(track.bandwidth / 1000), id: track.id }));
-      const textTracks = player.getTextTracks();
-      const subtitles: SubtitleTrack[] = textTracks.map(track => ({ id: track.id.toString(), label: track.label || track.language || 'Unknown', language: track.language || 'unknown' }));
+      });
       
-      let audioTracks: AudioTrack[] = [];
-      const audioInfos = player.getAudioLanguagesAndRoles();
-      if (audioInfos && audioInfos.length > 0) {
-        audioTracks = audioInfos.map((audioInfo: any, index: number) => ({
-          id: index,
-          label: audioInfo.language || `Audio ${index + 1}`,
-          language: audioInfo.language || 'unknown'
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (!isMountedRef.current) return;
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+        
+        const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ 
+          height: level.height || 0, 
+          bitrate: Math.round(level.bitrate / 1000), 
+          id: index 
         }));
-      } else {
-        const variants = player.getVariantTracks();
-        const uniqueAudios = [...new Set(variants.map((v: any) => v.audioRoles ? v.audioRoles.join(',') : 'main'))];
-        if (uniqueAudios.length > 1) {
-          audioTracks = uniqueAudios.map((role, index) => ({
+        
+        let audioTracks: AudioTrack[] = [];
+        if (hls.audioTracks && hls.audioTracks.length > 0) {
+          audioTracks = hls.audioTracks.map((track: any, index: number) => ({
             id: index,
-            label: role || `Audio ${index + 1}`,
-            language: 'und'
+            label: track.name || track.lang || `Audio ${index + 1}`,
+            language: track.lang || 'unknown'
           }));
         } else {
           audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
         }
-      }
-      
-      video.muted = muted;
-      if (autoPlay) video.play().catch(console.warn);
+        
+        video.muted = muted;
+        if (autoPlay) {
+          video.play().catch(err => {
+            setPlayerState(prev => ({ ...prev, isPlaying: false }));
+          });
+        }
 
-      // FIX: Correctly detect DVR (VOD) streams vs. true Live
-      const duration = video.duration;
-      const isLive = player.isLive() && (!isFinite(duration) || duration === 0);
+        const duration = video.duration;
+        const isLive = (hls.liveSyncPosition !== null) && (!isFinite(duration) || duration === 0);
+        
+        setPlayerState(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          error: null, 
+          availableQualities: levels, 
+          availableAudioTracks: audioTracks, 
+          currentQuality: hls.currentLevel, 
+          currentAudioTrack: hls.audioTrack || 0, 
+          isMuted: video.muted, 
+          isPlaying: !video.paused, 
+          showControls: true,
+          isLive: isLive,
+          duration: isLive ? Infinity : duration,
+        }));
+        
+        updateCurrentQualityHeight();
+        startControlsTimer();
+      });
+      
+      hls.on(Hls.Events.LEVEL_SWITCHED, () => {
+        updateCurrentQualityHeight();
+      });
+      
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      initNativePlayer(url, video);
+    } else {
+      throw new Error('HLS is not supported in this browser');
+    }
+  } catch (error) { 
+    // SECURITY: Don't log error that might contain URL
+    throw error; 
+  }
+};
+
+// 3. UPDATE initShakaPlayer - Remove URL logging
+const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
+  try {
+    if (shaka.polyfill) {
+      shaka.polyfill.installAll();
+    }
+    
+    const Player = shaka.Player;
+    if (!Player || !Player.isBrowserSupported()) {
+      throw new Error('This browser is not supported by Shaka Player');
+    }
+    
+    if (shakaPlayerRef.current) await shakaPlayerRef.current.destroy();
+    const player = new Player(video);
+    shakaPlayerRef.current = player;
+    
+    player.configure({ 
+      streaming: { 
+        bufferingGoal: 15, 
+        rebufferingGoal: 8, 
+        bufferBehind: 30,
+        retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
+        useNativeHlsOnSafari: true,
+        jumpLargeGaps: true,
+        inbandTextTracks: true,
+      },
+      manifest: {
+        retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
+        dash: {
+          clockSyncUri: '',
+          ignoreDrmInfo: false,
+          sequenceMode: true,
+          timeShiftBufferDepth: 60,
+        },
+      },
+      abr: {
+        enabled: true,
+        defaultBandwidthEstimate: 1500000,
+        bandwidthUpgradeSeconds: 5,
+        bandwidthDowngradeSeconds: 10,
+      },
+      drm: {
+        retryParameters: { timeout: 5000, maxAttempts: 2 },
+        servers: {},
+        advanced: {},
+      },
+      networking: {
+        requestFilter: drmInfo && drmInfo.token ? (type: any, request: any) => {
+          request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
+        } : undefined,
+      },
+    });
+
+    if (drmInfo) {
+      if (drmInfo.scheme === 'clearkey') {
+        if (drmInfo.license && drmInfo.license.includes(':')) {
+          const [keyId, key] = drmInfo.license.split(':');
+          player.configure({ drm: { clearKeys: { [keyId]: key } } });
+        } else if (drmInfo.token) {
+          player.configure({
+            drm: {
+              servers: { 'com.widevine.alpha': 'https://your-license-server.com/clearkey' },
+              advanced: {
+                'com.widevine.alpha': {
+                  requestType: 1,
+                  serverCertificate: undefined,
+                },
+              },
+            },
+          });
+          player.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
+            if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) {
+              request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
+              request.body = JSON.stringify({ kids: [], type: 'temporary' });
+            }
+          });
+        }
+      } else {
+        if (drmInfo.licenseServer) {
+          player.configure({ drm: { servers: { [drmInfo.scheme]: drmInfo.licenseServer } } });
+        }
+      }
+    }
+
+    const onError = (event: any) => {
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+      const errorCode = event.detail.code;
+      let errorMessage = `Stream error occurred`;
+      
+      if (errorCode >= 6000 && errorCode < 7000) errorMessage = 'Network error - retrying...';
+      else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed';
+      else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error';
+      else if (errorCode === 1003) errorMessage = 'No playable streams';
       
       setPlayerState(prev => ({ 
         ...prev, 
         isLoading: false, 
-        error: null, 
-        availableQualities: qualities, 
-        availableSubtitles: subtitles, 
-        availableAudioTracks: audioTracks, 
-        currentQuality: -1, 
-        currentAudioTrack: 0,
-        isMuted: video.muted, 
-        isPlaying: true, 
-        showControls: true,
-        isLive: isLive,
-        duration: isLive ? Infinity : duration,
+        error: errorMessage, 
+        showControls: false 
       }));
-      updateCurrentQualityHeight();
-      startControlsTimer();
-      return () => player.removeEventListener('error', onError);
-    } catch (error) { 
-      throw error; 
+      
+      if (errorCode >= 6000 && errorCode < 7000) {
+        setTimeout(() => handleRetry(), 2000);
+      }
+      destroyPlayer();
+    };
+    
+    player.addEventListener('error', onError);
+    await player.load(url);
+    
+    if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+    
+    const tracks = player.getVariantTracks();
+    const qualities: QualityLevel[] = tracks.map(track => ({ 
+      height: track.height || 0, 
+      bitrate: Math.round(track.bandwidth / 1000), 
+      id: track.id 
+    }));
+    
+    const textTracks = player.getTextTracks();
+    const subtitles: SubtitleTrack[] = textTracks.map(track => ({ 
+      id: track.id.toString(), 
+      label: track.label || track.language || 'Unknown', 
+      language: track.language || 'unknown' 
+    }));
+    
+    let audioTracks: AudioTrack[] = [];
+    const audioInfos = player.getAudioLanguagesAndRoles();
+    if (audioInfos && audioInfos.length > 0) {
+      audioTracks = audioInfos.map((audioInfo: any, index: number) => ({
+        id: index,
+        label: audioInfo.language || `Audio ${index + 1}`,
+        language: audioInfo.language || 'unknown'
+      }));
+    } else {
+      audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
     }
-  };
+    
+    video.muted = muted;
+    if (autoPlay) video.play().catch(() => {});
+
+    const duration = video.duration;
+    const isLive = player.isLive() && (!isFinite(duration) || duration === 0);
+    
+    setPlayerState(prev => ({ 
+      ...prev, 
+      isLoading: false, 
+      error: null, 
+      availableQualities: qualities, 
+      availableSubtitles: subtitles, 
+      availableAudioTracks: audioTracks, 
+      currentQuality: -1, 
+      currentAudioTrack: 0,
+      isMuted: video.muted, 
+      isPlaying: true, 
+      showControls: true,
+      isLive: isLive,
+      duration: isLive ? Infinity : duration,
+    }));
+    
+    updateCurrentQualityHeight();
+    startControlsTimer();
+    return () => player.removeEventListener('error', onError);
+  } catch (error) { 
+    // SECURITY: Don't log error
+    throw error; 
+  }
+};
 
   const initNativePlayer = (url: string, video: HTMLVideoElement) => {
     video.src = url;
@@ -517,7 +567,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       video.removeEventListener('error', onError);
     };
   };
-  
+
   const formatTime = (time: number): string => {
     if (!isFinite(time) || time <= 0) return "0:00";
     const hours = Math.floor(time / 3600);
@@ -526,7 +576,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
-  
+
   const changeQuality = useCallback((qualityId: number) => {
     if (playerTypeRef.current === 'hls' && hlsRef.current) {
       hlsRef.current.currentLevel = qualityId;
@@ -610,7 +660,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       }, CONTROLS_HIDE_DELAY);
     }
   }, [playerState.isPlaying, playerState.showSettings, playerState.isSeeking]);
-  
+
   useEffect(() => {
     isMountedRef.current = true;
     initializePlayer();
@@ -634,8 +684,10 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const handleEnterPip = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPipActive: true })); };
     const handleLeavePip = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isPipActive: false })); };
     const handleFullscreenChange = () => { if (!isMountedRef.current) return; const isFullscreen = !!document.fullscreenElement; setPlayerState(prev => ({ ...prev, isFullscreen })); if (isFullscreen) resetControlsTimer(); };
-    video.addEventListener('play', handlePlay); video.addEventListener('pause', handlePause); video.addEventListener('waiting', handleWaiting); video.addEventListener('playing', handlePlaying); video.addEventListener('timeupdate', handleTimeUpdate); video.addEventListener('volumechange', handleVolumeChange); video.addEventListener('enterpictureinpicture', handleEnterPip); video.addEventListener('leavepictureinpicture', handleLeavePip); document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => { video.removeEventListener('play', handlePlay); video.removeEventListener('pause', handlePause); video.removeEventListener('waiting', handleWaiting); video.removeEventListener('playing', handlePlaying); video.removeEventListener('timeupdate', handleTimeUpdate); video.removeEventListener('volumechange', handleVolumeChange); video.removeEventListener('enterpictureinpicture', handleEnterPip); video.removeEventListener('leavepictureinpicture', handleLeavePip); document.removeEventListener('fullscreenchange', handleFullscreenChange); };
+    video.addEventListener('play', handlePlay); video.addEventListener('pause', handlePause); video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlaying); video.addEventListener('timeupdate', handleTimeUpdate); video.addEventListener('volumechange', handleVolumeChange); video.addEventListener('enterpictureinpicture', handleEnterPip); video.addEventListener('leavepictureinpicture', handleLeavePip); document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => { video.removeEventListener('play', handlePlay); video.removeEventListener('pause', handlePause);
+    video.removeEventListener('waiting', handleWaiting); video.removeEventListener('playing', handlePlaying); video.removeEventListener('timeupdate', handleTimeUpdate); video.removeEventListener('volumechange', handleVolumeChange); video.removeEventListener('enterpictureinpicture', handleEnterPip); video.removeEventListener('leavepictureinpicture', handleLeavePip); document.removeEventListener('fullscreenchange', handleFullscreenChange); };
   }, [playerState.isSeeking, resetControlsTimer]);
 
   useEffect(() => {
@@ -702,17 +754,17 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
   const calculateNewTime = useCallback((clientX: number): number | null => {
     const video = videoRef.current; const progressBar = progressRef.current; if (!video || !progressBar || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return null; const rect = progressBar.getBoundingClientRect(); const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width)); const percentage = clickX / rect.width; return percentage * video.duration;
   }, [playerState.isLive]);
-  
+
   const throttledUpdate = useCallback((updateFn: () => void) => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(updateFn);
   }, []);
-  
+
   // FIX: REMOVED e.preventDefault() to allow mouseup to fire
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.stopPropagation(); const video = videoRef.current; if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
-  
+
   const handleDragMove = useCallback((e: MouseEvent) => {
     if (!dragStartRef.current?.isDragging) return; 
     e.preventDefault(); // Prevent page scroll
@@ -725,7 +777,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
       lastActivityRef.current = Date.now();
     });
   }, [calculateNewTime, throttledUpdate]);
-  
+
   const handleDragEnd = useCallback(() => {
     if (!dragStartRef.current?.isDragging) return; 
     const video = videoRef.current; 
@@ -738,11 +790,11 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     lastActivityRef.current = Date.now();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
-  
+
   const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const newTime = calculateNewTime(e.clientX); if (newTime !== null && videoRef.current) videoRef.current.currentTime = newTime; setPlayerState(prev => ({ ...prev, showControls: true })); lastActivityRef.current = Date.now();
   }, [calculateNewTime]);
-  
+
   // FIX: REMOVED e.preventDefault() to allow touchend to fire
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.stopPropagation();
@@ -781,7 +833,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setPlayerState(prev => ({ ...prev, isSeeking: false, isPlaying: !videoRef.current?.paused }));
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
-  
+
   // FIX: Simplified logic to correctly handle play/pause for all player types
   const togglePlay = useCallback(() => {
     const video = videoRef.current; 
@@ -796,7 +848,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     setPlayerState(prev => ({ ...prev, showControls: true })); 
     lastActivityRef.current = Date.now();
   }, []);
-  
+
   // REVERT: Reverted to the original code. The 'volumechange' listener will handle the state update.
   const toggleMute = useCallback(() => {
     const video = videoRef.current; 
@@ -927,7 +979,8 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     const height = playerState.currentQualityHeight;
     if (playerState.currentQuality === -1) return `Auto (${height}p)`;
     const quality = playerState.availableQualities.find(q => q.id === playerState.currentQuality);
-    return quality ? `${quality.height}p` : `${height}p`;
+    return quality ?
+`${quality.height}p` : `${height}p`;
   };
 
   const getCurrentAudioLabel = () => {
@@ -1056,7 +1109,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
   };
 
   const sizes = getControlSizes();
-  
+
   return (
     <div ref={containerRef} className={`relative bg-black w-full h-full ${className}`} onMouseMove={handleMouseMove} onClick={handlePlayerClick}>
       <video ref={videoRef} className="w-full h-full object-contain" playsInline controls={false} />
@@ -1795,6 +1848,7 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
                         <ChevronRight size={16} className="text-white/70" />
                       </button>
                     )}
+                    
                     
                     <button
                       onClick={() => handleSettingClick('audio')}
