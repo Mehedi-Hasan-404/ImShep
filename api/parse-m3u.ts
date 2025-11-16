@@ -1,9 +1,8 @@
-// api/parse-m3u.ts - SECURED WITH DOMAIN RESTRICTION
+// api/parse-m3u.ts - SECURED WITH ORIGIN-ONLY VALIDATION
 export const config = {
   runtime: 'edge',
 };
 
-const API_KEY = process.env.API_KEY || 'your-api-key-change-this';
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['https://imshep.vercel.app'];
@@ -24,7 +23,7 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -116,29 +115,12 @@ export default async function handler(request: Request) {
     });
   }
 
-  // SECURITY: Verify origin is allowed
+  // SECURITY: Verify origin is allowed (no API key needed)
   if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
-    console.warn(`🚫 Unauthorized origin: ${origin}`);
     return new Response(
       JSON.stringify({ error: 'Unauthorized origin' }),
       { 
         status: 403,
-        headers: {
-          'Content-Type': 'application/json',
-          ...getCorsHeaders(origin),
-        }
-      }
-    );
-  }
-
-  // SECURITY: Verify API key
-  const apiKey = request.headers.get('x-api-key');
-  if (!apiKey || apiKey !== API_KEY) {
-    console.warn(`🚫 Invalid API key from ${origin}`);
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized' }),
-      { 
-        status: 401,
         headers: {
           'Content-Type': 'application/json',
           ...getCorsHeaders(origin),
@@ -190,8 +172,6 @@ export default async function handler(request: Request) {
       );
     }
 
-    console.log(`📡 Fetching M3U playlist: ${m3uUrl}`);
-
     const response = await fetch(m3uUrl);
     
     if (!response.ok) {
@@ -210,8 +190,6 @@ export default async function handler(request: Request) {
     const m3uContent = await response.text();
     const channels = parseM3U(m3uContent, categoryId, categoryName);
 
-    console.log(`✅ Parsed ${channels.length} channels from M3U playlist`);
-
     return new Response(
       JSON.stringify({ channels }),
       {
@@ -225,7 +203,6 @@ export default async function handler(request: Request) {
     );
 
   } catch (error: any) {
-    console.error('Parse M3U error:', error);
     return new Response(
       JSON.stringify({ 
         error: 'Failed to parse M3U playlist',
