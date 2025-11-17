@@ -3,7 +3,6 @@ export const config = {
   runtime: 'edge',
 };
 
-const API_KEY = process.env.API_KEY || 'your-api-key-change-this';
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['https://imshep.vercel.app'];
@@ -62,6 +61,7 @@ export default async function handler(request: Request) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': new URL(targetUrl).origin,
       },
+      redirect: 'follow', // Explicitly follow redirects
     });
 
     if (!response.ok) {
@@ -82,30 +82,37 @@ export default async function handler(request: Request) {
     // Handle M3U8 playlists - rewrite URLs
     if (contentType.includes('mpegurl') || contentType.includes('m3u') || targetUrl.includes('.m3u8')) {
       const text = await response.text();
-      const baseUrl = new URL(targetUrl);
       
+      // CRITICAL FIX: Use response.url to handle redirects (e.g. to CDN) correctly
+      const baseUrl = new URL(response.url);
+      
+      const createProxiedUrl = (target: string) => {
+        let absoluteUrl: string;
+        if (target.startsWith('http://') || target.startsWith('https://')) {
+          absoluteUrl = target;
+        } else if (target.startsWith('/')) {
+          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${target}`;
+        } else {
+          const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${target}`;
+        }
+        return `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}`;
+      };
+
       const rewrittenPlaylist = text.split('\n').map(line => {
         line = line.trim();
         
-        // Skip comments and empty lines
-        if (line.startsWith('#') || !line) {
-          return line;
+        if (!line) return line;
+        
+        // Fix for encrypted streams and subtitles (EXT-X-KEY, EXT-X-MAP, etc.)
+        if (line.startsWith('#')) {
+          return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+            return `URI="${createProxiedUrl(uri)}"`;
+          });
         }
         
         // Rewrite segment URLs
-        let absoluteUrl: string;
-        if (line.startsWith('http://') || line.startsWith('https://')) {
-          absoluteUrl = line;
-        } else if (line.startsWith('/')) {
-          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${line}`;
-        } else {
-          const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
-          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
-        }
-        
-        // Return proxied URL (no API key in URL)
-        const proxiedUrl = `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}`;
-        return proxiedUrl;
+        return createProxiedUrl(line);
       }).join('\n');
 
       return new Response(rewrittenPlaylist, {
@@ -118,7 +125,7 @@ export default async function handler(request: Request) {
       });
     }
 
-    // Pass through other content (segments, etc.)
+    // Pass through other content (segments, keys, etc.)
     const headers = new Headers(getCorsHeaders(origin));
     if (contentType) headers.set('Content-Type', contentType);
     
