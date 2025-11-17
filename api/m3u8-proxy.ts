@@ -32,9 +32,8 @@ export default async function handler(request: Request) {
     });
   }
 
-  // SECURITY: Only check origin (no API key from client)
   if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
-    console.warn(`🚫 Unauthorized request from ${origin}`);
+    // SECURITY: Don't log origin details
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: {
@@ -67,7 +66,7 @@ export default async function handler(request: Request) {
 
     if (!response.ok) {
       return new Response(
-        JSON.stringify({ error: `Failed to fetch: ${response.status}` }),
+        JSON.stringify({ error: `Failed to fetch stream` }),
         {
           status: response.status,
           headers: {
@@ -134,9 +133,9 @@ export default async function handler(request: Request) {
     });
 
   } catch (error: any) {
-    console.error('❌ Proxy error:', error);
+    // SECURITY: Don't log error details
     return new Response(
-      JSON.stringify({ error: 'Proxy failed', details: error.message }),
+      JSON.stringify({ error: 'Proxy failed' }),
       {
         status: 500,
         headers: {
