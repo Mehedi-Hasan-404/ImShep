@@ -90,58 +90,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-// 1. UPDATE VideoPlayer.tsx - Remove URL logging from detectStreamType
-const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
-  let cleanUrl = url;
-  let drmInfo = null;
-  
-  if (url.includes('?|')) {
-    const [baseUrl, drmParams] = url.split('?|');
-    cleanUrl = baseUrl;
+  const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
+    let cleanUrl = url;
+    let drmInfo = null;
     
-    if (drmParams) {
-      const params = new URLSearchParams(drmParams);
-      const drmScheme = params.get('drmScheme');
-      const drmLicense = params.get('drmLicense');
-      const token = params.get('token') || params.get('authToken');
+    if (url.includes('?|')) {
+      const [baseUrl, drmParams] = url.split('?|');
+      cleanUrl = baseUrl;
       
-      if (drmScheme && drmLicense) {
-        drmInfo = { scheme: drmScheme, license: drmLicense, token };
-      } else if (token) {
-        drmInfo = { token };
+      if (drmParams) {
+        const params = new URLSearchParams(drmParams);
+        const drmScheme = params.get('drmScheme');
+        const drmLicense = params.get('drmLicense');
+        const token = params.get('token') || params.get('authToken');
+        
+        if (drmScheme && drmLicense) {
+          drmInfo = { scheme: drmScheme, license: drmLicense, token };
+        } else if (token) {
+          drmInfo = { token };
+        }
       }
     }
-  }
 
-  const urlLower = cleanUrl.toLowerCase();
-  
-  // SECURITY: Remove console.log that exposes URLs
-  if (urlLower.includes('.m3u8') || 
-      urlLower.includes('/hls/') || 
-      urlLower.includes('hls') || 
-      urlLower.includes('/api/m3u8-proxy')) {
+    const urlLower = cleanUrl.toLowerCase();
+    
+    if (urlLower.includes('.m3u8') || 
+        urlLower.includes('/hls/') || 
+        urlLower.includes('hls') || 
+        urlLower.includes('/api/m3u8-proxy')) {
+      return { type: 'hls', cleanUrl, drmInfo };
+    }
+    
+    if (urlLower.includes('.mpd') || 
+        urlLower.includes('/dash/') || 
+        urlLower.includes('dash')) {
+      return { type: 'dash', cleanUrl, drmInfo };
+    }
+
+    if (urlLower.includes('.mp4') || 
+        urlLower.includes('.webm') || 
+        urlLower.includes('.mov')) {
+      return { type: 'native', cleanUrl, drmInfo };
+    }
+    
+    if (urlLower.includes('manifest') || drmInfo) {
+      return { type: 'dash', cleanUrl, drmInfo };
+    }
+    
     return { type: 'hls', cleanUrl, drmInfo };
-  }
-  
-  if (urlLower.includes('.mpd') || 
-      urlLower.includes('/dash/') || 
-      urlLower.includes('dash')) {
-    return { type: 'dash', cleanUrl, drmInfo };
-  }
-
-  if (urlLower.includes('.mp4') || 
-      urlLower.includes('.webm') || 
-      urlLower.includes('.mov')) {
-    return { type: 'native', cleanUrl, drmInfo };
-  }
-  
-  if (urlLower.includes('manifest') || drmInfo) {
-    return { type: 'dash', cleanUrl, drmInfo };
-  }
-  
-  // SECURITY: No URL logging
-  return { type: 'hls', cleanUrl, drmInfo };
-}, []);
+  }, []);
 
   const destroyPlayer = useCallback(() => {
     if (hlsRef.current) {
@@ -217,312 +214,306 @@ const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'na
     }
   }, [streamUrl, autoPlay, muted, destroyPlayer, detectStreamType]);
 
-// 2. UPDATE initHlsPlayer - Remove error logging with URLs
-const initHlsPlayer = async (url: string, video: HTMLVideoElement) => {
-  try {
-    const Hls = (await import('hls.js')).default;
-    if (Hls && Hls.isSupported()) {
-      const hls = new Hls({ 
-        enableWorker: true, 
-        debug: false,  // SECURITY: Disable debug mode
-        capLevelToPlayerSize: true, 
-        maxLoadingDelay: 4,
-        maxBufferLength: 30,
-        maxBufferSize: 60 * 1000 * 1000,
-        fragLoadingTimeOut: 20000,
-        manifestLoadingTimeOut: 10000,
-        startLevel: -1, 
-        startPosition: -1,
-        xhrSetup: (xhr: XMLHttpRequest, url: string) => {
-          xhr.withCredentials = false;
-          xhr.setRequestHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-        }
-      });
-      
-      hlsRef.current = hls;
-      
-      let retryCount = 0;
-      const maxRetries = 3;
-      
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (!isMountedRef.current) return;
+  const initHlsPlayer = async (url: string, video: HTMLVideoElement) => {
+    try {
+      const Hls = (await import('hls.js')).default;
+      if (Hls && Hls.isSupported()) {
+        const hls = new Hls({ 
+          enableWorker: true, 
+          debug: false, 
+          capLevelToPlayerSize: true, 
+          maxLoadingDelay: 4,
+          maxBufferLength: 30,
+          maxBufferSize: 60 * 1000 * 1000,
+          fragLoadingTimeOut: 20000,
+          manifestLoadingTimeOut: 10000,
+          startLevel: -1, 
+          startPosition: -1,
+          xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+            xhr.withCredentials = false;
+            // FIXED: Removed unsafe User-Agent header setting
+          }
+        });
         
-        // SECURITY: Don't log error details that might contain URLs
+        hlsRef.current = hls;
         
-        if (data.fatal) {
-          if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (!isMountedRef.current) return;
           
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              if (retryCount < maxRetries) {
-                retryCount++;
-                setTimeout(() => {
-                  hls.startLoad();
-                }, 1000 * retryCount);
-              } else {
+          if (data.fatal) {
+            if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+            
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                if (retryCount < maxRetries) {
+                  retryCount++;
+                  setTimeout(() => {
+                    hls.startLoad();
+                  }, 1000 * retryCount);
+                } else {
+                  setPlayerState(prev => ({ 
+                    ...prev, 
+                    isLoading: false, 
+                    error: 'Network error: Unable to load stream',
+                    showControls: false 
+                  }));
+                  destroyPlayer();
+                }
+                break;
+                
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+                
+              default:
                 setPlayerState(prev => ({ 
                   ...prev, 
                   isLoading: false, 
-                  error: 'Network error: Unable to load stream',
+                  error: 'Playback error occurred',
                   showControls: false 
                 }));
                 destroyPlayer();
+                break;
+            }
+          }
+        });
+        
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (!isMountedRef.current) return;
+          if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+          
+          const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ 
+            height: level.height || 0, 
+            bitrate: Math.round(level.bitrate / 1000), 
+            id: index 
+          }));
+          
+          let audioTracks: AudioTrack[] = [];
+          if (hls.audioTracks && hls.audioTracks.length > 0) {
+            audioTracks = hls.audioTracks.map((track: any, index: number) => ({
+              id: index,
+              label: track.name || track.lang || `Audio ${index + 1}`,
+              language: track.lang || 'unknown'
+            }));
+          } else {
+            audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
+          }
+          
+          video.muted = muted;
+          if (autoPlay) {
+            video.play().catch(err => {
+              setPlayerState(prev => ({ ...prev, isPlaying: false }));
+            });
+          }
+
+          const duration = video.duration;
+          const isLive = (hls.liveSyncPosition !== null) && (!isFinite(duration) || duration === 0);
+          
+          setPlayerState(prev => ({ 
+            ...prev, 
+            isLoading: false, 
+            error: null, 
+            availableQualities: levels, 
+            availableAudioTracks: audioTracks, 
+            currentQuality: hls.currentLevel, 
+            currentAudioTrack: hls.audioTrack || 0, 
+            isMuted: video.muted, 
+            isPlaying: !video.paused, 
+            showControls: true,
+            isLive: isLive,
+            duration: isLive ? Infinity : duration,
+          }));
+          
+          updateCurrentQualityHeight();
+          startControlsTimer();
+        });
+        
+        hls.on(Hls.Events.LEVEL_SWITCHED, () => {
+          updateCurrentQualityHeight();
+        });
+        
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        initNativePlayer(url, video);
+      } else {
+        throw new Error('HLS is not supported in this browser');
+      }
+    } catch (error) { 
+      throw error; 
+    }
+  };
+
+  const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
+    try {
+      if (shaka.polyfill) {
+        shaka.polyfill.installAll();
+      }
+      
+      const Player = shaka.Player;
+      if (!Player || !Player.isBrowserSupported()) {
+        throw new Error('This browser is not supported by Shaka Player');
+      }
+      
+      if (shakaPlayerRef.current) await shakaPlayerRef.current.destroy();
+      const player = new Player(video);
+      shakaPlayerRef.current = player;
+      
+      player.configure({ 
+        streaming: { 
+          bufferingGoal: 15, 
+          rebufferingGoal: 8, 
+          bufferBehind: 30,
+          retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
+          useNativeHlsOnSafari: true,
+          jumpLargeGaps: true,
+          inbandTextTracks: true,
+        },
+        manifest: {
+          retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
+          dash: {
+            clockSyncUri: '',
+            ignoreDrmInfo: false,
+            sequenceMode: true,
+            timeShiftBufferDepth: 60,
+          },
+        },
+        abr: {
+          enabled: true,
+          defaultBandwidthEstimate: 1500000,
+          bandwidthUpgradeSeconds: 5,
+          bandwidthDowngradeSeconds: 10,
+        },
+        drm: {
+          retryParameters: { timeout: 5000, maxAttempts: 2 },
+          servers: {},
+          advanced: {},
+        },
+        networking: {
+          requestFilter: drmInfo && drmInfo.token ? (type: any, request: any) => {
+            request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
+          } : undefined,
+        },
+      });
+
+      if (drmInfo) {
+        if (drmInfo.scheme === 'clearkey') {
+          if (drmInfo.license && drmInfo.license.includes(':')) {
+            const [keyId, key] = drmInfo.license.split(':');
+            player.configure({ drm: { clearKeys: { [keyId]: key } } });
+          } else if (drmInfo.token) {
+            player.configure({
+              drm: {
+                servers: { 'com.widevine.alpha': 'https://your-license-server.com/clearkey' },
+                advanced: {
+                  'com.widevine.alpha': {
+                    requestType: 1,
+                    serverCertificate: undefined,
+                  },
+                },
+              },
+            });
+            player.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
+              if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) {
+                request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
+                request.body = JSON.stringify({ kids: [], type: 'temporary' });
               }
-              break;
-              
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-              
-            default:
-              setPlayerState(prev => ({ 
-                ...prev, 
-                isLoading: false, 
-                error: 'Playback error occurred',
-                showControls: false 
-              }));
-              destroyPlayer();
-              break;
+            });
+          }
+        } else {
+          if (drmInfo.licenseServer) {
+            player.configure({ drm: { servers: { [drmInfo.scheme]: drmInfo.licenseServer } } });
           }
         }
-      });
-      
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (!isMountedRef.current) return;
-        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-        
-        const levels: QualityLevel[] = hls.levels.map((level: any, index: number) => ({ 
-          height: level.height || 0, 
-          bitrate: Math.round(level.bitrate / 1000), 
-          id: index 
-        }));
-        
-        let audioTracks: AudioTrack[] = [];
-        if (hls.audioTracks && hls.audioTracks.length > 0) {
-          audioTracks = hls.audioTracks.map((track: any, index: number) => ({
-            id: index,
-            label: track.name || track.lang || `Audio ${index + 1}`,
-            language: track.lang || 'unknown'
-          }));
-        } else {
-          audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
-        }
-        
-        video.muted = muted;
-        if (autoPlay) {
-          video.play().catch(err => {
-            setPlayerState(prev => ({ ...prev, isPlaying: false }));
-          });
-        }
+      }
 
-        const duration = video.duration;
-        const isLive = (hls.liveSyncPosition !== null) && (!isFinite(duration) || duration === 0);
+      const onError = (event: any) => {
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+        const errorCode = event.detail.code;
+        let errorMessage = `Stream error occurred`;
+        
+        if (errorCode >= 6000 && errorCode < 7000) errorMessage = 'Network error - retrying...';
+        else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed';
+        else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error';
+        else if (errorCode === 1003) errorMessage = 'No playable streams';
         
         setPlayerState(prev => ({ 
           ...prev, 
           isLoading: false, 
-          error: null, 
-          availableQualities: levels, 
-          availableAudioTracks: audioTracks, 
-          currentQuality: hls.currentLevel, 
-          currentAudioTrack: hls.audioTrack || 0, 
-          isMuted: video.muted, 
-          isPlaying: !video.paused, 
-          showControls: true,
-          isLive: isLive,
-          duration: isLive ? Infinity : duration,
+          error: errorMessage, 
+          showControls: false 
         }));
         
-        updateCurrentQualityHeight();
-        startControlsTimer();
-      });
-      
-      hls.on(Hls.Events.LEVEL_SWITCHED, () => {
-        updateCurrentQualityHeight();
-      });
-      
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      initNativePlayer(url, video);
-    } else {
-      throw new Error('HLS is not supported in this browser');
-    }
-  } catch (error) { 
-    // SECURITY: Don't log error that might contain URL
-    throw error; 
-  }
-};
-
-// 3. UPDATE initShakaPlayer - Remove URL logging
-const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: any) => {
-  try {
-    if (shaka.polyfill) {
-      shaka.polyfill.installAll();
-    }
-    
-    const Player = shaka.Player;
-    if (!Player || !Player.isBrowserSupported()) {
-      throw new Error('This browser is not supported by Shaka Player');
-    }
-    
-    if (shakaPlayerRef.current) await shakaPlayerRef.current.destroy();
-    const player = new Player(video);
-    shakaPlayerRef.current = player;
-    
-    player.configure({ 
-      streaming: { 
-        bufferingGoal: 15, 
-        rebufferingGoal: 8, 
-        bufferBehind: 30,
-        retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
-        useNativeHlsOnSafari: true,
-        jumpLargeGaps: true,
-        inbandTextTracks: true,
-      },
-      manifest: {
-        retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 },
-        dash: {
-          clockSyncUri: '',
-          ignoreDrmInfo: false,
-          sequenceMode: true,
-          timeShiftBufferDepth: 60,
-        },
-      },
-      abr: {
-        enabled: true,
-        defaultBandwidthEstimate: 1500000,
-        bandwidthUpgradeSeconds: 5,
-        bandwidthDowngradeSeconds: 10,
-      },
-      drm: {
-        retryParameters: { timeout: 5000, maxAttempts: 2 },
-        servers: {},
-        advanced: {},
-      },
-      networking: {
-        requestFilter: drmInfo && drmInfo.token ? (type: any, request: any) => {
-          request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
-        } : undefined,
-      },
-    });
-
-    if (drmInfo) {
-      if (drmInfo.scheme === 'clearkey') {
-        if (drmInfo.license && drmInfo.license.includes(':')) {
-          const [keyId, key] = drmInfo.license.split(':');
-          player.configure({ drm: { clearKeys: { [keyId]: key } } });
-        } else if (drmInfo.token) {
-          player.configure({
-            drm: {
-              servers: { 'com.widevine.alpha': 'https://your-license-server.com/clearkey' },
-              advanced: {
-                'com.widevine.alpha': {
-                  requestType: 1,
-                  serverCertificate: undefined,
-                },
-              },
-            },
-          });
-          player.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
-            if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) {
-              request.headers['Authorization'] = `Bearer ${drmInfo.token}`;
-              request.body = JSON.stringify({ kids: [], type: 'temporary' });
-            }
-          });
+        if (errorCode >= 6000 && errorCode < 7000) {
+          setTimeout(() => handleRetry(), 2000);
         }
-      } else {
-        if (drmInfo.licenseServer) {
-          player.configure({ drm: { servers: { [drmInfo.scheme]: drmInfo.licenseServer } } });
-        }
-      }
-    }
-
-    const onError = (event: any) => {
+        destroyPlayer();
+      };
+      
+      player.addEventListener('error', onError);
+      await player.load(url);
+      
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-      const errorCode = event.detail.code;
-      let errorMessage = `Stream error occurred`;
       
-      if (errorCode >= 6000 && errorCode < 7000) errorMessage = 'Network error - retrying...';
-      else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed';
-      else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error';
-      else if (errorCode === 1003) errorMessage = 'No playable streams';
+      const tracks = player.getVariantTracks();
+      const qualities: QualityLevel[] = tracks.map(track => ({ 
+        height: track.height || 0, 
+        bitrate: Math.round(track.bandwidth / 1000), 
+        id: track.id 
+      }));
+      
+      const textTracks = player.getTextTracks();
+      const subtitles: SubtitleTrack[] = textTracks.map(track => ({ 
+        id: track.id.toString(), 
+        label: track.label || track.language || 'Unknown', 
+        language: track.language || 'unknown' 
+      }));
+      
+      let audioTracks: AudioTrack[] = [];
+      const audioInfos = player.getAudioLanguagesAndRoles();
+      if (audioInfos && audioInfos.length > 0) {
+        audioTracks = audioInfos.map((audioInfo: any, index: number) => ({
+          id: index,
+          label: audioInfo.language || `Audio ${index + 1}`,
+          language: audioInfo.language || 'unknown'
+        }));
+      } else {
+        audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
+      }
+      
+      video.muted = muted;
+      if (autoPlay) video.play().catch(() => {});
+
+      const duration = video.duration;
+      const isLive = player.isLive() && (!isFinite(duration) || duration === 0);
       
       setPlayerState(prev => ({ 
         ...prev, 
         isLoading: false, 
-        error: errorMessage, 
-        showControls: false 
+        error: null, 
+        availableQualities: qualities, 
+        availableSubtitles: subtitles, 
+        availableAudioTracks: audioTracks, 
+        currentQuality: -1, 
+        currentAudioTrack: 0,
+        isMuted: video.muted, 
+        isPlaying: true, 
+        showControls: true,
+        isLive: isLive,
+        duration: isLive ? Infinity : duration,
       }));
       
-      if (errorCode >= 6000 && errorCode < 7000) {
-        setTimeout(() => handleRetry(), 2000);
-      }
-      destroyPlayer();
-    };
-    
-    player.addEventListener('error', onError);
-    await player.load(url);
-    
-    if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-    
-    const tracks = player.getVariantTracks();
-    const qualities: QualityLevel[] = tracks.map(track => ({ 
-      height: track.height || 0, 
-      bitrate: Math.round(track.bandwidth / 1000), 
-      id: track.id 
-    }));
-    
-    const textTracks = player.getTextTracks();
-    const subtitles: SubtitleTrack[] = textTracks.map(track => ({ 
-      id: track.id.toString(), 
-      label: track.label || track.language || 'Unknown', 
-      language: track.language || 'unknown' 
-    }));
-    
-    let audioTracks: AudioTrack[] = [];
-    const audioInfos = player.getAudioLanguagesAndRoles();
-    if (audioInfos && audioInfos.length > 0) {
-      audioTracks = audioInfos.map((audioInfo: any, index: number) => ({
-        id: index,
-        label: audioInfo.language || `Audio ${index + 1}`,
-        language: audioInfo.language || 'unknown'
-      }));
-    } else {
-      audioTracks = [{ id: 0, label: 'Default', language: 'und' }];
+      updateCurrentQualityHeight();
+      startControlsTimer();
+      return () => player.removeEventListener('error', onError);
+    } catch (error) { 
+      throw error; 
     }
-    
-    video.muted = muted;
-    if (autoPlay) video.play().catch(() => {});
-
-    const duration = video.duration;
-    const isLive = player.isLive() && (!isFinite(duration) || duration === 0);
-    
-    setPlayerState(prev => ({ 
-      ...prev, 
-      isLoading: false, 
-      error: null, 
-      availableQualities: qualities, 
-      availableSubtitles: subtitles, 
-      availableAudioTracks: audioTracks, 
-      currentQuality: -1, 
-      currentAudioTrack: 0,
-      isMuted: video.muted, 
-      isPlaying: true, 
-      showControls: true,
-      isLive: isLive,
-      duration: isLive ? Infinity : duration,
-    }));
-    
-    updateCurrentQualityHeight();
-    startControlsTimer();
-    return () => player.removeEventListener('error', onError);
-  } catch (error) { 
-    // SECURITY: Don't log error
-    throw error; 
-  }
-};
+  };
 
   const initNativePlayer = (url: string, video: HTMLVideoElement) => {
     video.src = url;
@@ -532,7 +523,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
       video.muted = muted;
       if (autoPlay) video.play().catch(console.warn);
 
-      // FIX: Correctly detect DVR (VOD) streams vs. true Live
       const duration = video.duration;
       const isLive = !isFinite(duration);
       
@@ -543,7 +533,7 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         availableAudioTracks: [{ id: 0, label: 'Default', language: 'und' }], 
         isMuted: video.muted, 
         isPlaying: true, 
-        showControls: true,
+        showControls: true, 
         isLive: isLive,
         duration: isLive ? Infinity : duration,
       }));
@@ -760,7 +750,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
     rafRef.current = requestAnimationFrame(updateFn);
   }, []);
 
-  // FIX: REMOVED e.preventDefault() to allow mouseup to fire
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.stopPropagation(); const video = videoRef.current; if (!video || !isFinite(video.duration) || video.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
@@ -795,7 +784,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
     const newTime = calculateNewTime(e.clientX); if (newTime !== null && videoRef.current) videoRef.current.currentTime = newTime; setPlayerState(prev => ({ ...prev, showControls: true })); lastActivityRef.current = Date.now();
   }, [calculateNewTime]);
 
-  // FIX: REMOVED e.preventDefault() to allow touchend to fire
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.stopPropagation();
     const video = videoRef.current;
@@ -834,7 +822,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
 
-  // FIX: Simplified logic to correctly handle play/pause for all player types
   const togglePlay = useCallback(() => {
     const video = videoRef.current; 
     if (!video) return; 
@@ -849,7 +836,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
     lastActivityRef.current = Date.now();
   }, []);
 
-  // REVERT: Reverted to the original code. The 'volumechange' listener will handle the state update.
   const toggleMute = useCallback(() => {
     const video = videoRef.current; 
     if (video) { 
@@ -870,7 +856,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
     }
   }, []);
 
-  // REVERT: Reverted to the original code. The 'timeupdate' listener will handle the state update.
   const seekBackward = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -885,7 +870,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
     lastActivityRef.current = Date.now();
   }, [playerState.isLive]);
 
-  // REVERT: Reverted to the original code. The 'timeupdate' listener will handle the state update.
   const seekForward = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -1036,7 +1020,7 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         textClass: 'text-lg',
         progressBarClass: 'h-2',
         progressThumbClass: 'w-5 h-5',
-        progressInsetClass: 'left-2.5 right-2.5', // FIX: Added Inset
+        progressInsetClass: 'left-2.5 right-2.5', 
         containerPaddingClass: 'p-6'
       };
     }
@@ -1053,7 +1037,7 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         textClass: 'text-base',
         progressBarClass: 'h-1.5',
         progressThumbClass: 'w-4 h-4',
-        progressInsetClass: 'left-2 right-2', // FIX: Added Inset
+        progressInsetClass: 'left-2 right-2', 
         containerPaddingClass: 'p-4'
       };
     }
@@ -1070,7 +1054,7 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         textClass: 'text-sm',
         progressBarClass: 'h-1',
         progressThumbClass: 'w-3 h-3',
-        progressInsetClass: 'left-1.5 right-1.5', // FIX: Added Inset
+        progressInsetClass: 'left-1.5 right-1.5', 
         containerPaddingClass: 'p-3'
       };
     }
@@ -1087,7 +1071,7 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         textClass: 'text-base',
         progressBarClass: 'h-1.5',
         progressThumbClass: 'w-4 h-4',
-        progressInsetClass: 'left-2 right-2', // FIX: Added Inset
+        progressInsetClass: 'left-2 right-2', 
         containerPaddingClass: 'p-4'
       };
     }
@@ -1103,7 +1087,7 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
       textClass: 'text-sm',
       progressBarClass: 'h-1',
       progressThumbClass: 'w-3 h-3',
-      progressInsetClass: 'left-1.5 right-1.5', // FIX: Added Inset
+      progressInsetClass: 'left-1.5 right-1.5', 
       containerPaddingClass: 'p-4'
     };
   };
@@ -1171,14 +1155,12 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
             <div className="mb-2 md:mb-3 flex-shrink-0">
               <div ref={progressRef} className="relative h-2 py-2 -my-2 bg-transparent cursor-pointer group" onClick={handleProgressClick} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
                 
-                {/* FIX FOR SEEKBAR ALIGNMENT: Replaced 'inset-x-0' with the new inset class */}
                 <div className={`absolute ${sizes.progressInsetClass} top-1/2 -translate-y-1/2 ${sizes.progressBarClass} bg-white bg-opacity-30 rounded-full`}>
                   
                   <div className="absolute top-0 left-0 h-full bg-white bg-opacity-50 rounded-full" style={{ width: isFinite(playerState.duration) && playerState.duration > 0 ? `${(playerState.buffered / playerState.duration) * 100}%` : '0%' }}/>
                   <div className="absolute top-0 left-0 h-full bg-red-500 rounded-full" style={{ width: `${currentTimePercentage}%` }}/>
                 </div>
                 
-                {/* FIX FOR SEEKBAR JUMP: Removed the 'scale-150' when playerState.isSeeking is true */}
                 <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 ${sizes.progressThumbClass} rounded-full bg-red-500 transition-all duration-150 ease-out group-hover:scale-150`} style={{ left: `${currentTimePercentage}%` }} onMouseDown={handleDragStart} onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart}/>
               </div>
             </div>
@@ -1195,10 +1177,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
                       {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />}
                     </button>
                     
-                    {/* FIX FOR DESKTOP VOLUME SLIDER: 
-                      Replaced all broken Tailwind classes with the single CSS class 'volume-slider-horizontal' 
-                      to show the "white marked area" (the track)
-                    */}
                     <input
                       type="range"
                       min="0"
@@ -1286,10 +1264,8 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
               )}
               
               {isMobile && (
-                // FIX FOR MOBILE CONTROLS OVERFLOW: Parent container (removed justify-between)
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-nowrap`}>
                   
-                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Left group (added flex-shrink-0) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}>
                     <button 
                       onClick={(e) => { e.stopPropagation(); toggleMute(); }} 
@@ -1306,13 +1282,11 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
                       {playerState.isLive ? (
                         <span className="px-1.5 py-0.5 bg-red-600 rounded text-xs font-semibold">LIVE</span>
                       ) : (
-                        /* FIX FOR CRASH: Replaced playerPlayerState.duration with playerState.duration */
                         <>{formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}</>
                       )}
                     </div>
                   </div>
 
-                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Center group (added flex-1, min-w-0, justify-center) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 justify-center`}>
                     <button 
                       onClick={(e) => { e.stopPropagation(); seekBackward(); }} 
@@ -1339,7 +1313,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
                     </button>
                   </div>
 
-                  {/* FIX FOR MOBILE CONTROLS OVERFLOW: Right group (added flex-shrink-0) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}>
                     {document.pictureInPictureEnabled && (
                       <button 
@@ -1367,7 +1340,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         </div>
       )}
 
-      {/* Settings Overlay - Desktop Only */}
       {playerState.showSettings && !isMobile && !playerState.error && (
         <>
           <div 
@@ -1575,7 +1547,6 @@ const initShakaPlayer = async (url: string, video: HTMLVideoElement, drmInfo?: a
         </>
       )}
       
-      {/* Settings Overlay - Mobile */}
       {playerState.showSettings && isMobile && !playerState.error && (
         <>
           <div 
