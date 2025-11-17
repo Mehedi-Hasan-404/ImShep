@@ -66,7 +66,7 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
       const data = await response.json();
       return data.channels || [];
     } catch (error) {
-      console.error('Error loading channels');
+      // SECURITY: Don't log error
       throw error;
     }
   };
