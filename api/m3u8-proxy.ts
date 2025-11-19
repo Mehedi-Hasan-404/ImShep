@@ -1,11 +1,16 @@
-// api/m3u8-proxy.ts - SIMPLIFIED WORKING VERSION
+// api/m3u8-proxy.ts - FIXED WORKING VERSION
 export const config = {
   runtime: 'edge',
 };
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['https://imshep.vercel.app', 'http://localhost:5000'];
+  : ['https://imshep.vercel.app'];
+
+// Log configuration on startup (only in development)
+if (process.env.NODE_ENV !== 'production') {
+  console.log('M3U8 Proxy Config:', { allowedOrigins: ALLOWED_ORIGINS });
+}
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
   const allowedOrigin = (origin && ALLOWED_ORIGINS.includes(origin)) ? origin : ALLOWED_ORIGINS[0];
@@ -13,9 +18,10 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range',
+    'Access-Control-Allow-Headers': 'Content-Type, Range, Authorization',
     'Access-Control-Max-Age': '86400',
     'Access-Control-Expose-Headers': 'Content-Length, Content-Type, Content-Range, Accept-Ranges',
+    'Access-Control-Allow-Credentials': 'true',
   };
 }
 
@@ -31,9 +37,13 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Origin validation
-  if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
-    return new Response(JSON.stringify({ error: 'Unauthorized origin' }), {
+  // Origin validation - Allow if origin is in allowed list OR if no origin (direct access)
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    console.error('Unauthorized origin:', origin);
+    return new Response(JSON.stringify({ 
+      error: 'Unauthorized origin',
+      allowedOrigins: ALLOWED_ORIGINS 
+    }), {
       status: 403,
       headers: {
         'Content-Type': 'application/json',
@@ -45,6 +55,7 @@ export default async function handler(request: Request) {
   // Get target URL
   const targetUrl = url.searchParams.get('url');
   if (!targetUrl) {
+    console.error('Missing url parameter');
     return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
       status: 400,
       headers: {
@@ -54,11 +65,23 @@ export default async function handler(request: Request) {
     });
   }
 
+  // Log request (only in development)
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Proxying request:', {
+      origin,
+      targetUrl: targetUrl.substring(0, 100) + '...',
+      method: request.method,
+    });
+  }
+
   try {
     // Fetch the stream
     const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
     };
 
     // Forward Range header for video segments
@@ -73,18 +96,25 @@ export default async function handler(request: Request) {
       headers['Referer'] = targetUrlObj.origin + '/';
       headers['Origin'] = targetUrlObj.origin;
     } catch (e) {
-      // Ignore invalid URLs
+      console.warn('Could not set referer/origin headers');
     }
 
     const response = await fetch(targetUrl, {
       headers,
       redirect: 'follow',
+      signal: AbortSignal.timeout(30000), // 30 second timeout
     });
 
     if (!response.ok) {
+      console.error('Stream fetch failed:', {
+        status: response.status,
+        statusText: response.statusText,
+      });
+      
       return new Response(
         JSON.stringify({ 
           error: `Stream unavailable: ${response.status}`,
+          details: response.statusText,
         }),
         {
           status: response.status,
@@ -138,11 +168,15 @@ export default async function handler(request: Request) {
         return trimmedLine;
       }).join('\n');
 
+      console.log('Successfully proxied M3U8 playlist');
+
       return new Response(rewrittenPlaylist, {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.apple.mpegurl',
           'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
           ...getCorsHeaders(origin),
         },
       });
@@ -178,15 +212,23 @@ export default async function handler(request: Request) {
       responseHeaders.set('Cache-Control', 'public, max-age=60');
     }
 
+    console.log('Successfully proxied stream segment');
+
     return new Response(response.body, {
       status: response.status,
       headers: responseHeaders,
     });
 
   } catch (error: any) {
+    console.error('Proxy error:', {
+      message: error.message,
+      name: error.name,
+    });
+
     return new Response(
       JSON.stringify({ 
         error: 'Proxy failed to fetch stream',
+        details: error.message,
       }),
       {
         status: 500,
