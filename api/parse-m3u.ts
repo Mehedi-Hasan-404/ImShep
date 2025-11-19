@@ -1,11 +1,9 @@
-// api/parse-m3u.ts - SECURED WITH ORIGIN-ONLY VALIDATION
+// api/parse-m3u.ts - SIMPLIFIED VERSION
 export const config = {
   runtime: 'edge',
 };
 
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['https://imshep.vercel.app'];
+const ALLOWED_ORIGIN = 'https://imshep.vercel.app';
 
 interface Channel {
   id: string;
@@ -14,11 +12,10 @@ interface Channel {
   streamUrl: string;
   categoryId: string;
   categoryName: string;
-  referer?: string;
 }
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
-  const allowedOrigin = (origin && ALLOWED_ORIGINS.includes(origin)) ? origin : ALLOWED_ORIGINS[0];
+  const allowedOrigin = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
   
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
@@ -28,7 +25,7 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   };
 }
 
-const parseM3U = (m3uContent: string, categoryId: string, categoryName: string): Channel[] => {
+function parseM3U(m3uContent: string, categoryId: string, categoryName: string): Channel[] {
   const lines = m3uContent.split('\n').map(line => line.trim()).filter(line => line);
   const channels: Channel[] = [];
   let currentChannel: Partial<Channel> = {};
@@ -37,23 +34,20 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
     const line = lines[i];
 
     if (line.startsWith('#EXTINF:')) {
+      // Extract channel name
       let channelName = 'Unknown Channel';
       
       const tvgNameMatch = line.match(/tvg-name="([^"]+)"/);
       if (tvgNameMatch) {
         channelName = tvgNameMatch[1].trim();
       } else {
-        const groupTitleMatch = line.match(/group-title="[^"]*",\s*(.+)$/);
-        if (groupTitleMatch) {
-          channelName = groupTitleMatch[1].trim();
-        } else {
-          const nameMatch = line.match(/,\s*([^,]+)$/);
-          if (nameMatch) {
-            channelName = nameMatch[1].trim();
-          }
+        const nameMatch = line.match(/,\s*(.+)$/);
+        if (nameMatch) {
+          channelName = nameMatch[1].trim();
         }
       }
       
+      // Extract logo
       const logoMatch = line.match(/tvg-logo="([^"]+)"/);
       const logoUrl = logoMatch ? logoMatch[1] : '/channel-placeholder.svg';
 
@@ -64,45 +58,28 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
         categoryName,
       };
     } else if (line && !line.startsWith('#') && currentChannel.name) {
-      let streamUrl = line;
-      let referer = '';
+      // This is the stream URL
+      const streamUrl = line;
       
-      if (line.includes('|Referer=') || line.includes('|referer=')) {
-        const parts = line.split('|');
-        streamUrl = parts[0].trim();
-        
-        const refererPart = parts[1];
-        if (refererPart) {
-          const refererMatch = refererPart.match(/(?:Referer|referer)=(.+)/);
-          if (refererMatch) {
-            referer = refererMatch[1].trim();
-          }
-        }
-      }
-      
+      // Generate unique ID
       const cleanChannelName = currentChannel.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
       const channelId = `${categoryId}_${cleanChannelName}_${channels.length}`;
       
-      const finalStreamUrl = referer 
-        ? `${streamUrl}?__referer=${encodeURIComponent(referer)}`
-        : streamUrl;
-      
-      const channel: Channel = {
+      channels.push({
         id: channelId,
         name: currentChannel.name,
         logoUrl: currentChannel.logoUrl || '/channel-placeholder.svg',
-        streamUrl: finalStreamUrl,
+        streamUrl: streamUrl,
         categoryId,
         categoryName,
-      };
+      });
       
-      channels.push(channel);
       currentChannel = {};
     }
   }
 
   return channels;
-};
+}
 
 export default async function handler(request: Request) {
   const origin = request.headers.get('origin');
@@ -115,8 +92,8 @@ export default async function handler(request: Request) {
     });
   }
 
-  // SECURITY: Verify origin is allowed (no API key needed)
-  if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
+  // SECURITY: Only allow imshep.vercel.app
+  if (origin !== ALLOWED_ORIGIN) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized origin' }),
       { 
@@ -146,9 +123,9 @@ export default async function handler(request: Request) {
     const body = await request.json();
     const { categoryId, categoryName, m3uUrl } = body;
 
-    if (!categoryId || !categoryName) {
+    if (!categoryId || !categoryName || !m3uUrl) {
       return new Response(
-        JSON.stringify({ error: 'Missing categoryId or categoryName' }),
+        JSON.stringify({ error: 'Missing required fields' }),
         { 
           status: 400,
           headers: { 
@@ -159,20 +136,12 @@ export default async function handler(request: Request) {
       );
     }
 
-    if (!m3uUrl) {
-      return new Response(
-        JSON.stringify({ error: 'Missing m3uUrl' }),
-        { 
-          status: 400,
-          headers: { 
-            'Content-Type': 'application/json',
-            ...getCorsHeaders(origin),
-          }
-        }
-      );
-    }
-
-    const response = await fetch(m3uUrl);
+    // Fetch M3U playlist
+    const response = await fetch(m3uUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }
+    });
     
     if (!response.ok) {
       return new Response(
