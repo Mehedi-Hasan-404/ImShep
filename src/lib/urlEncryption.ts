@@ -1,4 +1,4 @@
-// src/lib/urlEncryption.ts - NO API KEY IN FRONTEND
+// src/lib/urlEncryption.ts - SIMPLIFIED VERSION
 const PROXY_URL = '/api/m3u8-proxy';
 
 export function getProxiedUrl(originalUrl: string): string {
@@ -7,30 +7,29 @@ export function getProxiedUrl(originalUrl: string): string {
   }
   
   // Clean URL if it's already proxied
-  let cleanUrl = originalUrl;
   if (originalUrl.includes('/api/m3u8-proxy?url=')) {
     try {
       const urlObj = new URL(originalUrl, window.location.origin);
       const encodedUrl = urlObj.searchParams.get('url');
       if (encodedUrl) {
-        cleanUrl = decodeURIComponent(encodedUrl);
+        return originalUrl; // Already proxied
       }
     } catch (e) {
-      console.error('Error cleaning proxied URL:', e);
+      // Continue to proxy
     }
   }
   
-  // Check if URL needs proxying (M3U8 streams)
-  const urlLower = cleanUrl.toLowerCase();
-  const isM3U8 = urlLower.includes('.m3u8') || 
-                 urlLower.includes('/hls/') ||
-                 urlLower.includes('hls');
+  // Check if URL needs proxying (M3U8/HLS streams)
+  const urlLower = originalUrl.toLowerCase();
+  const needsProxy = urlLower.includes('.m3u8') || 
+                     urlLower.includes('.m3u') ||
+                     urlLower.includes('/hls/') ||
+                     urlLower.includes('m3u8');
   
-  if (isM3U8) {
-    // No API key in URL - origin validation only
-    const proxiedUrl = `${PROXY_URL}?url=${encodeURIComponent(cleanUrl)}`;
-    return proxiedUrl;
+  if (needsProxy) {
+    return `${PROXY_URL}?url=${encodeURIComponent(originalUrl)}`;
   }
   
-  return cleanUrl;
+  // Return original URL for direct streams (MP4, etc.)
+  return originalUrl;
 }
