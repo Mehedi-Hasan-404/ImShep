@@ -48,7 +48,8 @@ export function getProxiedUrl(originalUrl: string): string {
     }
   }
   
-  // Check if URL needs proxying
+  // CRITICAL FIX: Always proxy HLS/M3U8 streams for manual channels
+  // The needsProxying check ensures we only proxy the right content
   if (needsProxying(originalUrl)) {
     const proxiedUrl = `${PROXY_URL}?url=${encodeURIComponent(originalUrl)}`;
     console.log('Proxying stream URL:', {
