@@ -1,4 +1,4 @@
-// src/App.tsx - WITH STREAM TEST ROUTE
+// /src/App.tsx
 import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -16,6 +16,7 @@ const Favorites = lazy(() => import("@/pages/Favorites"));
 const CategoryChannels = lazy(() => import("@/pages/CategoryChannels"));
 const ChannelPlayer = lazy(() => import("@/pages/ChannelPlayer"));
 const Admin = lazy(() => import("@/pages/Admin"));
+const Contact = lazy(() => import("@/pages/Contact")); // Import new page
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -42,6 +43,9 @@ const App = () => (
                   </Route>
                   <Route path="/favorites">
                     <Layout><Favorites /></Layout>
+                  </Route>
+                  <Route path="/contact">
+                    <Layout><Contact /></Layout>
                   </Route>
                   <Route path="/category/:slug">
                     {(params: { slug: string } | undefined) => 
