@@ -1,4 +1,4 @@
-// src/pages/ChannelPlayer.tsx - FIXED: Ensure all streams are proxied
+// src/pages/ChannelPlayer.tsx - FIXED: Auto-clean URLs and Proxy
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -178,7 +178,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
           if (doc.id === decodedChannelId) {
             const channelData = doc.data();
             
-            // 🔧 FIX: Validate that streamUrl exists before creating channel
             if (!channelData.streamUrl || channelData.streamUrl.trim() === '') {
               console.error('❌ Manual channel missing stream URL:', {
                 id: doc.id,
@@ -201,8 +200,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
             console.log('✅ Found MANUAL channel:', {
               id: foundChannel.id,
               name: foundChannel.name,
-              streamUrl: foundChannel.streamUrl.substring(0, 50) + '...',
-              willBeProxied: foundChannel.streamUrl.includes('http')
+              streamUrl: foundChannel.streamUrl.substring(0, 50) + '...'
             });
             break;
           }
@@ -251,7 +249,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         return;
       }
 
-      // 🔧 FIX: Final validation before setting channel
       if (!foundChannel.streamUrl || foundChannel.streamUrl.trim() === '') {
         setError(`Channel "${foundChannel.name}" has an invalid or missing stream URL.`);
         setLoading(false);
@@ -356,16 +353,16 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
   const isChannelFavorite = isFavorite(channel.id);
   
-  // ✅ CRITICAL FIX: Always proxy ALL streams (manual + M3U)
-  const playerStreamUrl = getProxiedUrl(channel.streamUrl);
+  // ✅ FIXED: Strip extra M3U parameters (like |Referer=) and ensure proxying
+  const cleanStreamUrl = channel.streamUrl.split('|')[0].trim();
+  const playerStreamUrl = getProxiedUrl(cleanStreamUrl);
   
   console.log('🎬 Player URL Debug:', {
     channelName: channel.name,
-    originalUrl: channel.streamUrl.substring(0, 60) + '...',
-    proxiedUrl: playerStreamUrl.substring(0, 60) + '...',
-    isProxied: playerStreamUrl.includes('/api/m3u8-proxy'),
-    urlType: channel.streamUrl.includes('.m3u8') ? 'HLS' : 
-             channel.streamUrl.includes('.mp4') ? 'MP4' : 'Unknown'
+    originalUrl: channel.streamUrl.substring(0, 50) + '...',
+    cleanUrl: cleanStreamUrl.substring(0, 50) + '...',
+    proxiedUrl: playerStreamUrl.substring(0, 50) + '...',
+    isProxied: playerStreamUrl.includes('/api/m3u8-proxy')
   });
 
   return (
