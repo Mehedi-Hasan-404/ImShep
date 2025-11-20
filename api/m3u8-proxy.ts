@@ -5,7 +5,14 @@ export const config = {
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['https://imshep.vercel.app'];
+  : [
+      'https://imshep.vercel.app',
+      'https://livetvpro.vercel.app',
+      'http://localhost:5000',
+      'http://localhost:3000',
+      'http://127.0.0.1:5000',
+      'http://127.0.0.1:3000'
+    ];
 
 // Log configuration on startup (only in development)
 if (process.env.NODE_ENV !== 'production') {
@@ -13,6 +20,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
+  // Allow all origins in allowed list, fallback to first if no match
   const allowedOrigin = (origin && ALLOWED_ORIGINS.includes(origin)) ? origin : ALLOWED_ORIGINS[0];
   
   return {
