@@ -2,21 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { PublicChannel, Category } from '@/types';
 import VideoPlayer from '@/components/VideoPlayer';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, Star, Share2, AlertCircle, Search, Play } from 'lucide-react';
+import { ArrowLeft, Star, Share2, AlertCircle } from 'lucide-react';
 import { useFavorites } from '@/contexts/FavoritesContext';
-import { useRecents } from '@/contexts/RecentsContext';
 import { toast } from "@/components/ui/sonner";
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { getProxiedUrl } from '@/lib/urlEncryption';
-// REMOVED: import { streamService } from '@/services/streamService';
+import { streamService } from '@/services/streamService';
+import { PublicChannel } from '@/types';
 
 interface ChannelPlayerProps {
   channelId: string;
