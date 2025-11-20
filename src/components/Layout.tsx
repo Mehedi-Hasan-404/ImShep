@@ -12,8 +12,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [location] = useLocation();
   
-  // Hide bottom nav on category and channel pages - only show on home and favorites
-  const showBottomNav = location === '/' || location === '/favorites';
+  // Update logic to show bottom nav on contact page as well
+  const showBottomNav = location === '/' || location === '/favorites' || location === '/contact';
 
   return (
     <div className="min-h-screen bg-background">
