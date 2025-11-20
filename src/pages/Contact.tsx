@@ -58,7 +58,7 @@ const Contact = () => {
       ),
       color: "from-blue-400 to-blue-600",
       description: "Join our channel for the latest updates and announcements.",
-      link: "https://t.me/livetvproofficial", // Add your link
+      link: "https://t.me/livetvprochat", // Add your link
       delay: 100
     },
     {
