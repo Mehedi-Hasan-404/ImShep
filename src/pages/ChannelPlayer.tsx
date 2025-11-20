@@ -37,19 +37,17 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   // CRITICAL FIX: Scroll to top when channel changes
   useEffect(() => {
     if (channel && topRef.current) {
-      // Smooth scroll to top
       topRef.current.scrollIntoView({ 
         behavior: 'smooth', 
         block: 'start' 
       });
       
-      // Also scroll window to top (backup)
       window.scrollTo({ 
         top: 0, 
         behavior: 'smooth' 
       });
     }
-  }, [channel?.id]); // Trigger when channel ID changes
+  }, [channel?.id]);
 
   useEffect(() => {
     if (channelId) {
@@ -60,7 +58,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     }
   }, [channelId]);
 
-  // Fetch all channels from the same category after channel is loaded
   useEffect(() => {
     if (channel && channel.categoryId) {
       fetchAllChannels();
@@ -80,7 +77,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     }
   }, [searchQuery, allChannels, channel]);
 
-  // --- UPDATED FUNCTION ---
   const fetchM3UPlaylist = async (m3uUrl: string, categoryId: string, categoryName: string): Promise<PublicChannel[]> => {
     try {
       const response = await fetch('/api/parse-m3u', {
@@ -103,11 +99,9 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
       const data = await response.json();
       return data.channels || [];
     } catch (error) {
-      // SECURITY: Don't log error
       return [];
     }
   };
-  // --- END UPDATED FUNCTION ---
 
   const fetchAllChannels = async () => {
     try {
@@ -115,6 +109,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
       let categoryChannelsList: PublicChannel[] = [];
 
+      // Fetch manual channels from Firestore
       try {
         const channelsRef = collection(db, 'channels');
         const channelsQuery = query(channelsRef, where('categoryId', '==', channel.categoryId));
@@ -128,6 +123,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         console.error('Error fetching manual channels');
       }
 
+      // Fetch M3U playlist channels
       try {
         const categoriesRef = collection(db, 'categories');
         const categoryDoc = await getDocs(query(categoriesRef, where('__name__', '==', channel.categoryId)));
@@ -174,6 +170,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
       const decodedChannelId = decodeURIComponent(channelId);
       let foundChannel: PublicChannel | null = null;
 
+      // STEP 1: Try to find in manual channels first
       try {
         const channelsRef = collection(db, 'channels');
         const channelsSnapshot = await getDocs(channelsRef);
@@ -189,6 +186,11 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
               categoryId: channelData.categoryId || '',
               categoryName: channelData.categoryName || 'Unknown Category'
             };
+            console.log('✅ Found MANUAL channel:', {
+              id: foundChannel.id,
+              name: foundChannel.name,
+              streamUrl: foundChannel.streamUrl.substring(0, 50) + '...'
+            });
             break;
           }
         }
@@ -196,6 +198,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         console.error('Error fetching manual channels');
       }
 
+      // STEP 2: If not found, search in M3U playlists
       if (!foundChannel) {
         const categoriesRef = collection(db, 'categories');
         const categoriesSnapshot = await getDocs(categoriesRef);
@@ -215,11 +218,15 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
               if (m3uChannel) {
                 foundChannel = m3uChannel;
+                console.log('✅ Found M3U channel:', {
+                  id: foundChannel.id,
+                  name: foundChannel.name,
+                  streamUrl: foundChannel.streamUrl.substring(0, 50) + '...'
+                });
                 break;
               }
             } catch (m3uError) {
-               // SECURITY: Don't log details that might contain URL
-               console.error('Error checking M3U playlist for channel');
+              console.error('Error checking M3U playlist for channel');
             }
           }
         }
@@ -333,13 +340,19 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   }
 
   const isChannelFavorite = isFavorite(channel.id);
-  const playerStreamUrl = channel.streamUrl && channel.streamUrl.includes(".m3u8")
-    ? getProxiedUrl(channel.streamUrl)
-    : channel.streamUrl;
+  
+  // ✅ CRITICAL FIX: Always proxy ALL streams (manual + M3U)
+  const playerStreamUrl = getProxiedUrl(channel.streamUrl);
+  
+  console.log('🎬 Player URL Debug:', {
+    channelName: channel.name,
+    originalUrl: channel.streamUrl.substring(0, 60) + '...',
+    proxiedUrl: playerStreamUrl.substring(0, 60) + '...',
+    isProxied: playerStreamUrl.includes('/api/m3u8-proxy')
+  });
 
   return (
     <ErrorBoundary>
-      {/* CRITICAL FIX: Add ref for scroll target */}
       <div ref={topRef} className="space-y-6 p-4 sm:p-6">
 
         {/* Back Button and Actions */}
