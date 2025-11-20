@@ -1,5 +1,4 @@
-// src/types/index.ts - Updated with secure token support
-
+// /src/types/index.ts
 export interface User {
   uid: string;
   email: string;
@@ -10,26 +9,24 @@ export interface Category {
   name: string;
   slug: string;
   iconUrl?: string;
-  m3uUrl?: string;
-  order?: number;
+  m3uUrl?: string; // M3U playlist URL
+  order?: number; // Display order for sorting categories
 }
 
-// SECURITY: Never expose actual streamUrl to frontend
 export interface PublicChannel {
   id: string;
   name: string;
   logoUrl: string;
-  // streamUrl is removed - frontend only gets tokens
+  streamUrl: string;
   categoryId: string;
   categoryName: string;
 }
 
-// Admin still needs full URLs for management
 export interface AdminChannel {
   id: string;
   name: string;
   logoUrl: string;
-  streamUrl: string; // Only in admin context
+  streamUrl: string;
   categoryId: string;
   categoryName: string;
   authCookie?: string;
@@ -39,7 +36,7 @@ export interface FavoriteChannel {
   id: string;
   name: string;
   logoUrl: string;
-  // No streamUrl stored
+  streamUrl: string;
   categoryName: string;
   addedAt: number;
 }
@@ -48,14 +45,7 @@ export interface RecentChannel {
   id: string;
   name: string;
   logoUrl: string;
-  // No streamUrl stored
+  streamUrl: string;
   categoryName: string;
   watchedAt: number;
-}
-
-// New interface for stream tokens
-export interface StreamToken {
-  token: string;
-  expiresIn: number;
-  expiresAt: number;
 }
