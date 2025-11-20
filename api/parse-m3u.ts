@@ -1,7 +1,11 @@
-// api/parse-m3u.ts
+// api/parse-m3u.ts - SECURED WITH ORIGIN-ONLY VALIDATION
 export const config = {
   runtime: 'edge',
 };
+
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['https://imshep.vercel.app']; // Fallback is strictly 'imshep.vercel.app'
 
 interface Channel {
   id: string;
@@ -10,6 +14,18 @@ interface Channel {
   streamUrl: string;
   categoryId: string;
   categoryName: string;
+  referer?: string;
+}
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = (origin && ALLOWED_ORIGINS.includes(origin)) ? origin : ALLOWED_ORIGINS[0];
+  
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+  };
 }
 
 const parseM3U = (m3uContent: string, categoryId: string, categoryName: string): Channel[] => {
@@ -23,25 +39,21 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
     if (line.startsWith('#EXTINF:')) {
       let channelName = 'Unknown Channel';
       
-      // Method 1: Try tvg-name attribute
       const tvgNameMatch = line.match(/tvg-name="([^"]+)"/);
       if (tvgNameMatch) {
         channelName = tvgNameMatch[1].trim();
       } else {
-        // Method 2: Try group-title attribute followed by comma and name
-        const groupTitleMatch = line.match(/group-title="[^"]*",(.+)$/);
+        const groupTitleMatch = line.match(/group-title="[^"]*",\s*(.+)$/);
         if (groupTitleMatch) {
           channelName = groupTitleMatch[1].trim();
         } else {
-          // Method 3: Fallback to text after last comma
-          const nameMatch = line.match(/,([^,]+)$/);
+          const nameMatch = line.match(/,\s*([^,]+)$/);
           if (nameMatch) {
             channelName = nameMatch[1].trim();
           }
         }
       }
       
-      // Extract logo URL
       const logoMatch = line.match(/tvg-logo="([^"]+)"/);
       const logoUrl = logoMatch ? logoMatch[1] : '/channel-placeholder.svg';
 
@@ -52,15 +64,38 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
         categoryName,
       };
     } else if (line && !line.startsWith('#') && currentChannel.name) {
+      let streamUrl = line;
+      let referer = '';
+      
+      if (line.includes('|Referer=') || line.includes('|referer=')) {
+        const parts = line.split('|');
+        streamUrl = parts[0].trim();
+        
+        const refererPart = parts[1];
+        if (refererPart) {
+          const refererMatch = refererPart.match(/(?:Referer|referer)=(.+)/);
+          if (refererMatch) {
+            referer = refererMatch[1].trim();
+          }
+        }
+      }
+      
       const cleanChannelName = currentChannel.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const channelId = `${categoryId}_${cleanChannelName}_${channels.length}`;
+      
+      const finalStreamUrl = referer 
+        ? `${streamUrl}?__referer=${encodeURIComponent(referer)}`
+        : streamUrl;
+      
       const channel: Channel = {
-        id: `${categoryId}_${cleanChannelName}_${channels.length}`,
+        id: channelId,
         name: currentChannel.name,
         logoUrl: currentChannel.logoUrl || '/channel-placeholder.svg',
-        streamUrl: line,
+        streamUrl: finalStreamUrl,
         categoryId,
         categoryName,
       };
+      
       channels.push(channel);
       currentChannel = {};
     }
@@ -70,19 +105,28 @@ const parseM3U = (m3uContent: string, categoryId: string, categoryName: string):
 };
 
 export default async function handler(request: Request) {
-  const origin = request.headers.get('origin') || '';
+  const origin = request.headers.get('origin');
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Max-Age': '86400',
-      },
+      headers: getCorsHeaders(origin),
     });
+  }
+
+  // SECURITY: Verify origin is allowed (no API key needed)
+  if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized origin' }),
+      { 
+        status: 403,
+        headers: {
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        }
+      }
+    );
   }
 
   if (request.method !== 'POST') {
@@ -92,7 +136,7 @@ export default async function handler(request: Request) {
         status: 405,
         headers: { 
           'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
+          ...getCorsHeaders(origin),
         }
       }
     );
@@ -100,7 +144,7 @@ export default async function handler(request: Request) {
 
   try {
     const body = await request.json();
-    const { categoryId, categoryName } = body;
+    const { categoryId, categoryName, m3uUrl } = body;
 
     if (!categoryId || !categoryName) {
       return new Response(
@@ -109,16 +153,11 @@ export default async function handler(request: Request) {
           status: 400,
           headers: { 
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            ...getCorsHeaders(origin),
           }
         }
       );
     }
-
-    // Get the M3U URL from your Firebase/Firestore
-    // For security, the M3U URL should be stored server-side only
-    // For now, we'll accept it in the request body, but you should fetch it from your database
-    const { m3uUrl } = body;
 
     if (!m3uUrl) {
       return new Response(
@@ -127,13 +166,12 @@ export default async function handler(request: Request) {
           status: 400,
           headers: { 
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            ...getCorsHeaders(origin),
           }
         }
       );
     }
 
-    // Fetch the M3U playlist server-side
     const response = await fetch(m3uUrl);
     
     if (!response.ok) {
@@ -143,7 +181,7 @@ export default async function handler(request: Request) {
           status: response.status,
           headers: { 
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            ...getCorsHeaders(origin),
           }
         }
       );
@@ -158,14 +196,13 @@ export default async function handler(request: Request) {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=300', // Cache for 5 minutes
+          ...getCorsHeaders(origin),
+          'Cache-Control': 'public, max-age=300',
         },
       }
     );
 
   } catch (error: any) {
-    console.error('Parse M3U error:', error);
     return new Response(
       JSON.stringify({ 
         error: 'Failed to parse M3U playlist',
@@ -175,7 +212,7 @@ export default async function handler(request: Request) {
         status: 500,
         headers: { 
           'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
+          ...getCorsHeaders(origin),
         }
       }
     );
