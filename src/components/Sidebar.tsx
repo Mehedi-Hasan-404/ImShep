@@ -1,4 +1,4 @@
-import { X, Home, Star, Settings, Shield, Tv } from 'lucide-react';
+import { X, Home, Star, MessageCircle, Tv } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 
 interface SidebarProps {
@@ -19,6 +19,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       path: '/favorites',
       icon: Star,
       label: 'Favorites',
+    },
+    {
+      path: '/contact',
+      icon: MessageCircle,
+      label: 'Contact',
     },
   ];
 
