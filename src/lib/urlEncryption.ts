@@ -14,7 +14,23 @@ function needsProxying(url: string): boolean {
     return false;
   }
   
-  // Check if it's a stream that needs proxying
+  // Check if URL is local (same domain)
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.hostname === window.location.hostname) {
+      return false;
+    }
+  } catch (e) {
+    // Invalid URL, treat as needing proxy if it looks like a path
+  }
+
+  // CRITICAL: Assume ALL external http/https URLs need proxying
+  // This catches raw IP addresses and other non-standard stream URLs
+  if (url.startsWith('http')) {
+    return true;
+  }
+  
+  // Legacy checks (kept for fallback)
   return (
     urlLower.includes('.m3u8') ||
     urlLower.includes('.m3u') ||
@@ -48,7 +64,7 @@ export function getProxiedUrl(originalUrl: string): string {
     }
   }
   
-  // CRITICAL FIX: Always proxy HLS/M3U8 streams for manual channels
+  // CRITICAL FIX: Always proxy streams for manual channels
   // The needsProxying check ensures we only proxy the right content
   if (needsProxying(originalUrl)) {
     const proxiedUrl = `${PROXY_URL}?url=${encodeURIComponent(originalUrl)}`;
