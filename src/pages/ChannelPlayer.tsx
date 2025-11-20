@@ -1,19 +1,18 @@
+// src/pages/ChannelPlayer.tsx - SECURE VERSION WITH TOKENS
+
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { PublicChannel, Category } from '@/types';
 import VideoPlayer from '@/components/VideoPlayer';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, Star, Share2, AlertCircle, Search, Play } from 'lucide-react';
+import { ArrowLeft, Star, Share2, AlertCircle } from 'lucide-react';
 import { useFavorites } from '@/contexts/FavoritesContext';
-import { useRecents } from '@/contexts/RecentsContext';
 import { toast } from "@/components/ui/sonner";
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { getProxiedUrl } from '@/lib/urlEncryption';
+import { streamService } from '@/services/streamService';
+import { PublicChannel } from '@/types';
 
 interface ChannelPlayerProps {
   channelId: string;
@@ -22,149 +21,42 @@ interface ChannelPlayerProps {
 const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   const [, setLocation] = useLocation();
   const [channel, setChannel] = useState<PublicChannel | null>(null);
-  const [allChannels, setAllChannels] = useState<PublicChannel[]>([]);
-  const [filteredChannels, setFilteredChannels] = useState<PublicChannel[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [secureStreamUrl, setSecureStreamUrl] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // CRITICAL FIX: Add ref to scroll to top
   const topRef = useRef<HTMLDivElement>(null);
-
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
-  const { addRecent } = useRecents();
 
-  // CRITICAL FIX: Scroll to top when channel changes
+  // Scroll to top when channel changes
   useEffect(() => {
     if (channel && topRef.current) {
-      // Smooth scroll to top
       topRef.current.scrollIntoView({ 
         behavior: 'smooth', 
         block: 'start' 
       });
-      
-      // Also scroll window to top (backup)
       window.scrollTo({ 
         top: 0, 
         behavior: 'smooth' 
       });
     }
-  }, [channel?.id]); // Trigger when channel ID changes
+  }, [channel?.id]);
 
   useEffect(() => {
     if (channelId) {
-      fetchChannel();
+      fetchChannelAndToken();
     } else {
       setError('No channel ID provided in URL');
       setLoading(false);
     }
   }, [channelId]);
 
-  // Fetch all channels from the same category after channel is loaded
-  useEffect(() => {
-    if (channel && channel.categoryId) {
-      fetchAllChannels();
-    }
-  }, [channel?.id, channel?.categoryId]);
-
-  useEffect(() => {
-    if (allChannels.length > 0) {
-      const baseChannels = channel ? allChannels.filter(ch => ch.id !== channel.id) : allChannels;
-      const filtered = baseChannels.filter(ch => 
-        ch.name && 
-        ch.name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredChannels(filtered);
-    } else {
-      setFilteredChannels([]);
-    }
-  }, [searchQuery, allChannels, channel]);
-
-  // --- UPDATED FUNCTION ---
-  const fetchM3UPlaylist = async (m3uUrl: string, categoryId: string, categoryName: string): Promise<PublicChannel[]> => {
-    try {
-      const response = await fetch('/api/parse-m3u', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          categoryId,
-          categoryName,
-          m3uUrl,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch M3U playlist');
-      }
-
-      const data = await response.json();
-      return data.channels || [];
-    } catch (error) {
-      // SECURITY: Don't log error
-      return [];
-    }
-  };
-  // --- END UPDATED FUNCTION ---
-
-  const fetchAllChannels = async () => {
-    try {
-      if (!channel || !channel.categoryId) return;
-
-      let categoryChannelsList: PublicChannel[] = [];
-
-      try {
-        const channelsRef = collection(db, 'channels');
-        const channelsQuery = query(channelsRef, where('categoryId', '==', channel.categoryId));
-        const channelsSnapshot = await getDocs(channelsQuery);
-        const manualChannels = channelsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as PublicChannel[];
-        categoryChannelsList = [...categoryChannelsList, ...manualChannels];
-      } catch (manualChannelsError) {
-        console.error('Error fetching manual channels');
-      }
-
-      try {
-        const categoriesRef = collection(db, 'categories');
-        const categoryDoc = await getDocs(query(categoriesRef, where('__name__', '==', channel.categoryId)));
-        
-        if (!categoryDoc.empty) {
-          const categoryData = { id: categoryDoc.docs[0].id, ...categoryDoc.docs[0].data() } as Category;
-
-          if (categoryData.m3uUrl) {
-            const m3uChannels = await fetchM3UPlaylist(
-              categoryData.m3uUrl,
-              categoryData.id,
-              categoryData.name
-            );
-            if (m3uChannels.length > 0) {
-              categoryChannelsList = [...categoryChannelsList, ...m3uChannels];
-            }
-          }
-        }
-      } catch (m3uError) {
-        console.error('Error loading M3U playlist');
-      }
-
-      const uniqueChannels = categoryChannelsList.filter((ch, index, self) =>
-        index === self.findIndex((t) => t.id === ch.id)
-      );
-
-      setAllChannels(uniqueChannels);
-    } catch (error) {
-      console.error('Error in fetchAllChannels');
-    }
-  };
-
-  const fetchChannel = async () => {
+  const fetchChannelAndToken = async () => {
     try {
       setLoading(true);
       setError(null);
       setChannel(null);
+      setSecureStreamUrl('');
 
       if (!channelId) {
         setError('Channel ID is required');
@@ -172,78 +64,45 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
       }
 
       const decodedChannelId = decodeURIComponent(channelId);
-      let foundChannel: PublicChannel | null = null;
 
-      try {
-        const channelsRef = collection(db, 'channels');
-        const channelsSnapshot = await getDocs(channelsRef);
-
-        for (const doc of channelsSnapshot.docs) {
-          if (doc.id === decodedChannelId) {
-            const channelData = doc.data();
-            foundChannel = {
-              id: doc.id,
-              name: channelData.name || 'Unknown Channel',
-              logoUrl: channelData.logoUrl || '/channel-placeholder.svg',
-              streamUrl: channelData.streamUrl || '',
-              categoryId: channelData.categoryId || '',
-              categoryName: channelData.categoryName || 'Unknown Category'
-            };
-            break;
-          }
-        }
-      } catch (manualChannelsError) {
-        console.error('Error fetching manual channels');
+      // Fetch channel metadata from backend API
+      // This API should return channel info WITHOUT stream URLs
+      const response = await fetch(`/api/get-channel-metadata?channelId=${encodeURIComponent(decodedChannelId)}`);
+      
+      if (!response.ok) {
+        throw new Error('Channel not found');
       }
 
-      if (!foundChannel) {
-        const categoriesRef = collection(db, 'categories');
-        const categoriesSnapshot = await getDocs(categoriesRef);
-
-        for (const categoryDoc of categoriesSnapshot.docs) {
-          const categoryData = { id: categoryDoc.id, ...categoryDoc.data() } as Category;
-
-          if (categoryData.m3uUrl) {
-            try {
-              const m3uChannels = await fetchM3UPlaylist(
-                categoryData.m3uUrl,
-                categoryData.id,
-                categoryData.name
-              );
-
-              const m3uChannel = m3uChannels.find(ch => ch.id === decodedChannelId);
-
-              if (m3uChannel) {
-                foundChannel = m3uChannel;
-                break;
-              }
-            } catch (m3uError) {
-               // SECURITY: Don't log details that might contain URL
-               console.error('Error checking M3U playlist for channel');
-            }
-          }
-        }
-      }
-
-      if (!foundChannel) {
+      const channelData = await response.json();
+      
+      if (!channelData) {
         setLoading(false);
         setLocation('/404');
         return;
       }
 
-      if (!foundChannel.streamUrl) {
-        setError('Channel stream URL is missing or invalid.');
+      // Set channel data (no streamUrl included)
+      const channelInfo: PublicChannel = {
+        id: channelData.id,
+        name: channelData.name,
+        logoUrl: channelData.logoUrl,
+        categoryId: channelData.categoryId,
+        categoryName: channelData.categoryName,
+      };
+
+      setChannel(channelInfo);
+
+      // Get secure stream URL with token
+      try {
+        const url = await streamService.getSecureStreamUrl(decodedChannelId);
+        setSecureStreamUrl(url);
+      } catch (tokenError) {
+        setError('Failed to get stream access. Please try again.');
         return;
       }
 
-      setChannel(foundChannel);
-
-      if (addRecent) {
-        addRecent(foundChannel);
-      }
-
     } catch (error) {
-      setError(`Failed to load channel`);
+      setError('Failed to load channel');
     } finally {
       setLoading(false);
     }
@@ -275,7 +134,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
           url: window.location.href,
         });
       } catch (error) {
-        console.error('Error sharing');
+        // User cancelled or error
       }
     } else {
       try {
@@ -284,12 +143,6 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
       } catch (error) {
         toast.error("Failed to copy link");
       }
-    }
-  };
-
-  const handleChannelSelect = (selectedChannel: PublicChannel) => {
-    if (selectedChannel && selectedChannel.id) {
-      setLocation(`/channel/${encodeURIComponent(selectedChannel.id)}`);
     }
   };
 
@@ -312,8 +165,8 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     );
   }
 
-  if (error || !channel) {
-    const displayError = error || 'Channel not found or stream is missing.';
+  if (error || !channel || !secureStreamUrl) {
+    const displayError = error || 'Channel not found or stream unavailable.';
     return (
       <div className="space-y-6 p-4 sm:p-6">
         <Button 
@@ -333,15 +186,10 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   }
 
   const isChannelFavorite = isFavorite(channel.id);
-  const playerStreamUrl = channel.streamUrl && channel.streamUrl.includes(".m3u8")
-    ? getProxiedUrl(channel.streamUrl)
-    : channel.streamUrl;
 
   return (
     <ErrorBoundary>
-      {/* CRITICAL FIX: Add ref for scroll target */}
       <div ref={topRef} className="space-y-6 p-4 sm:p-6">
-
         {/* Back Button and Actions */}
         <div className="flex items-center justify-between -mt-2">
           <Button 
@@ -362,7 +210,7 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
               <Star 
                 size={16} 
                 fill={isChannelFavorite ? 'currentColor' : 'none'} 
-                className={`mr-1 transition-all duration-300 ${isChannelFavorite ? 'animate-pulse' : ''}`} 
+                className={`mr-1 ${isChannelFavorite ? 'animate-pulse' : ''}`} 
               />
               {isChannelFavorite ? 'Favorited' : 'Favorite'}
             </Button>
@@ -386,15 +234,18 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
             <div className="flex items-center gap-2 mt-1">
               <Badge variant="secondary">{channel.categoryName}</Badge>
               <Badge variant="destructive" className="animate-pulse">LIVE</Badge>
+              <Badge variant="outline" className="text-green-500 border-green-500">
+                Secure
+              </Badge>
             </div>
           </div>
         </div>
 
-        {/* Video Player - Full Width */}
+        {/* Video Player - Uses secure tokenized URL */}
         <div className="w-full aspect-video bg-black overflow-hidden shadow-2xl">
           <VideoPlayer
             key={channel.id} 
-            streamUrl={playerStreamUrl}
+            streamUrl={secureStreamUrl}
             channelName={channel.name}
             autoPlay={true}
             muted={false}
@@ -402,88 +253,14 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
           />
         </div>
 
-        {/* Related Channels Section */}
-        <div className="related-channels-section pt-4">
-          <h2 className="text-xl font-semibold mb-4 border-b pb-2">
-            More Channels
-            {channel.categoryName && <span className="text-base text-gray-500 font-normal ml-2">in {channel.categoryName}</span>}
-          </h2>
-
-          <div className="mb-4 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-            <input
-              type="search"
-              placeholder="Search related channels..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border rounded-lg bg-card text-card-foreground focus:ring-2 focus:ring-accent focus:border-accent shadow-inner"
-            />
-          </div>
-
-          {filteredChannels.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-              {filteredChannels.map(ch => {
-                const isRelatedFavorite = isFavorite(ch.id);
-
-                return (
-                  <div 
-                    key={ch.id} 
-                    className="group cursor-pointer border rounded-lg hover:border-accent transition-all duration-300 bg-card shadow-sm hover:shadow-lg transform hover:scale-105 relative overflow-hidden"
-                    onClick={() => handleChannelSelect(ch)}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        try {
-                          if (isRelatedFavorite) {
-                            removeFavorite(ch.id);
-                          } else {
-                            addFavorite(ch);
-                          }
-                        } catch (error) {
-                          console.error('Error toggling favorite');
-                        }
-                      }}
-                      className={`absolute top-2 right-2 p-1.5 rounded-full z-10 transition-all duration-300 transform hover:scale-110 ${
-                        isRelatedFavorite
-                          ? 'bg-yellow-500 text-white shadow-lg'
-                          : 'bg-black/50 text-white hover:bg-black/70'
-                      }`}
-                      title={isRelatedFavorite ? 'Remove from favorites' : 'Add to favorites'}
-                    >
-                      <Star 
-                        size={14} 
-                        fill={isRelatedFavorite ? 'white' : 'none'} 
-                      />
-                    </button>
-
-                    <div className="aspect-video bg-muted flex items-center justify-center p-3">
-                      <img
-                        src={ch.logoUrl || '/channel-placeholder.svg'}
-                        alt={ch.name}
-                        className="w-full h-full object-contain"
-                        onError={(e) => { e.currentTarget.src = '/channel-placeholder.svg'; }}
-                      />
-                    </div>
-                    
-                    <div className="p-3 space-y-2">
-                      <p className="text-sm font-semibold line-clamp-2 min-h-[2.5rem] text-foreground">{ch.name}</p>
-                      <Badge className="flex w-full justify-center items-center gap-1.5 text-xs py-1.5" 
-                              variant="default">
-                        <Play size={12} />
-                        Watch Now
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <p>No other channels found matching your search.</p>
-            </div>
-          )}
-        </div>
+        {/* Security Notice */}
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="text-xs">
+            This stream is protected with encrypted token authentication. 
+            Tokens expire automatically for security.
+          </AlertDescription>
+        </Alert>
       </div>
     </ErrorBoundary>
   );
