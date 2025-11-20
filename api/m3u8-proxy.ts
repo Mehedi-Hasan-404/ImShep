@@ -1,41 +1,59 @@
-// api/m3u8-proxy.ts - FIXED WORKING VERSION
+// api/m3u8-proxy.ts - COMPLETE FIXED VERSION
 export const config = {
   runtime: 'edge',
 };
 
+const SECRET_KEY = process.env.PROXY_SECRET_KEY || 'your-secret-key-change-this-in-production';
+const API_KEY = process.env.API_KEY || 'your-api-key-change-this-in-production';
+
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : [
-      'https://imshep.vercel.app',
-      'https://livetvpro.vercel.app',
-      'http://localhost:5000',
-      'http://localhost:3000',
-      'http://127.0.0.1:5000',
-      'http://127.0.0.1:3000'
-    ];
+  : ['https://imshep.vercel.app'];
 
-// Log configuration on startup (only in development)
-if (process.env.NODE_ENV !== 'production') {
-  console.log('M3U8 Proxy Config:', { allowedOrigins: ALLOWED_ORIGINS });
+function encryptUrl(url: string): string {
+  const key = SECRET_KEY;
+  let encrypted = '';
+  for (let i = 0; i < url.length; i++) {
+    encrypted += String.fromCharCode(url.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return btoa(encrypted).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function decryptUrl(encrypted: string): string {
+  try {
+    const restored = encrypted.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = restored + '=='.substring(0, (4 - restored.length % 4) % 4);
+    const decoded = atob(padded);
+    
+    const key = SECRET_KEY;
+    let decrypted = '';
+    for (let i = 0; i < decoded.length; i++) {
+      decrypted += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return decrypted;
+  } catch (e) {
+    throw new Error('Invalid encrypted URL');
+  }
+}
+
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.includes(origin);
 }
 
 function getCorsHeaders(origin: string | null): Record<string, string> {
-  // Allow all origins in allowed list, fallback to first if no match
-  const allowedOrigin = (origin && ALLOWED_ORIGINS.includes(origin)) ? origin : ALLOWED_ORIGINS[0];
+  const allowedOrigin = isOriginAllowed(origin) ? origin : '*';
   
   return {
-    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Origin': allowedOrigin!,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
     'Access-Control-Max-Age': '86400',
-    'Access-Control-Expose-Headers': 'Content-Length, Content-Type, Content-Range, Accept-Ranges',
-    'Access-Control-Allow-Credentials': 'true',
   };
 }
 
 export default async function handler(request: Request) {
   const origin = request.headers.get('origin');
-  const url = new URL(request.url);
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -45,84 +63,62 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Origin validation - Allow if origin is in allowed list OR if no origin (direct access)
-  if (origin && !ALLOWED_ORIGINS.includes(origin)) {
-    console.error('Unauthorized origin:', origin);
-    return new Response(JSON.stringify({ 
-      error: 'Unauthorized origin',
-      allowedOrigins: ALLOWED_ORIGINS 
-    }), {
-      status: 403,
-      headers: {
-        'Content-Type': 'application/json',
-        ...getCorsHeaders(origin),
+  const { searchParams } = new URL(request.url);
+  const encryptedUrl = searchParams.get('token');
+  
+  // Accept API key from both header AND query parameter
+  const apiKeyFromHeader = request.headers.get('x-api-key');
+  const apiKeyFromQuery = searchParams.get('apiKey');
+  const providedApiKey = apiKeyFromHeader || apiKeyFromQuery;
+
+  // SECURITY CHECK 1: Validate API Key
+  if (!providedApiKey || providedApiKey !== API_KEY) {
+    console.warn(`🚫 BLOCKED - Invalid API Key from origin: ${origin}`);
+    return new Response(
+      JSON.stringify({ 
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key'
+      }),
+      { 
+        status: 401,
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        }
       }
-    });
+    );
   }
 
-  // Get target URL
-  const targetUrl = url.searchParams.get('url');
-  if (!targetUrl) {
-    console.error('Missing url parameter');
-    return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
-      status: 400,
-      headers: {
-        'Content-Type': 'application/json',
-        ...getCorsHeaders(origin),
+  if (!encryptedUrl) {
+    return new Response(
+      JSON.stringify({ error: 'Missing "token" parameter' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getCorsHeaders(origin),
+        } 
       }
-    });
-  }
-
-  // Log request (only in development)
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('Proxying request:', {
-      origin,
-      targetUrl: targetUrl.substring(0, 100) + '...',
-      method: request.method,
-    });
+    );
   }
 
   try {
-    // Fetch the stream
-    const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-    };
+    const streamUrl = decryptUrl(encryptedUrl);
+    console.log('🔓 Decrypted stream URL:', streamUrl);
 
-    // Forward Range header for video segments
-    const rangeHeader = request.headers.get('range');
-    if (rangeHeader) {
-      headers['Range'] = rangeHeader;
-    }
-
-    // Add referer from target URL origin
-    try {
-      const targetUrlObj = new URL(targetUrl);
-      headers['Referer'] = targetUrlObj.origin + '/';
-      headers['Origin'] = targetUrlObj.origin;
-    } catch (e) {
-      console.warn('Could not set referer/origin headers');
-    }
-
-    const response = await fetch(targetUrl, {
-      headers,
-      redirect: 'follow',
-      signal: AbortSignal.timeout(30000), // 30 second timeout
+    const response = await fetch(streamUrl, {
+      headers: {
+        'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0',
+        'Referer': new URL(streamUrl).origin,
+        'Accept': '*/*',
+      },
     });
 
     if (!response.ok) {
-      console.error('Stream fetch failed:', {
-        status: response.status,
-        statusText: response.statusText,
-      });
-      
+      console.error(`❌ Failed to fetch ${streamUrl}: ${response.status}`);
       return new Response(
         JSON.stringify({ 
-          error: `Stream unavailable: ${response.status}`,
-          details: response.statusText,
+          error: `Failed to fetch stream: ${response.status}` 
         }),
         {
           status: response.status,
@@ -135,137 +131,97 @@ export default async function handler(request: Request) {
     }
 
     const contentType = response.headers.get('content-type') || '';
+    
+    // Handle non-playlist content (segments, keys)
+    if (!contentType.includes('mpegurl') && !contentType.includes('m3u')) {
+      const headers = new Headers(getCorsHeaders(origin));
+      headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+      headers.set('Cache-Control', 'public, max-age=3600');
 
-    // Handle M3U8 playlists - rewrite URLs
-    if (contentType.includes('mpegurl') || 
-        contentType.includes('m3u8') || 
-        contentType.includes('m3u') || 
-        contentType.includes('vnd.apple.mpegurl') ||
-        targetUrl.toLowerCase().includes('.m3u8') ||
-        targetUrl.toLowerCase().includes('.m3u')) {
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) headers.set('Content-Length', contentLength);
       
-      const text = await response.text();
-      
-      // Get base URL from response (handles redirects)
-      const baseUrl = new URL(response.url);
-      const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
-      
-      // Rewrite playlist URLs
-      const rewrittenPlaylist = text.split('\n').map(line => {
-        const trimmedLine = line.trim();
-        
-        // Skip comments and empty lines
-        if (!trimmedLine || trimmedLine.startsWith('#EXT')) {
-          // Handle URIs in tags (like encryption keys)
-          if (trimmedLine.includes('URI="')) {
-            return trimmedLine.replace(/URI="([^"]+)"/g, (match, uri) => {
-              const absoluteUrl = resolveUrl(uri, baseUrl, basePath);
-              const proxiedUrl = `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}`;
-              return `URI="${proxiedUrl}"`;
-            });
-          }
-          return trimmedLine;
-        }
-        
-        // Rewrite segment/playlist URLs
-        if (!trimmedLine.startsWith('#')) {
-          const absoluteUrl = resolveUrl(trimmedLine, baseUrl, basePath);
-          return `${url.origin}${url.pathname}?url=${encodeURIComponent(absoluteUrl)}`;
-        }
-        
-        return trimmedLine;
-      }).join('\n');
+      if (contentType) headers.set('Content-Type', contentType);
 
-      console.log('Successfully proxied M3U8 playlist');
-
-      return new Response(rewrittenPlaylist, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/vnd.apple.mpegurl',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          ...getCorsHeaders(origin),
-        },
+      return new Response(response.body, {
+        status: response.status,
+        headers,
       });
     }
 
-    // Pass through video segments and other content
-    const responseHeaders = new Headers(getCorsHeaders(origin));
-    
-    if (contentType) {
-      responseHeaders.set('Content-Type', contentType);
-    }
-    
-    const contentLength = response.headers.get('content-length');
-    if (contentLength) {
-      responseHeaders.set('Content-Length', contentLength);
-    }
+    // Handle M3U8 playlist content
+    console.log('📋 Processing M3U8 playlist');
+    const m3u8Content = await response.text();
+    const baseUrl = new URL(streamUrl);
 
-    // Forward Range-related headers
-    const contentRange = response.headers.get('content-range');
-    if (contentRange) {
-      responseHeaders.set('Content-Range', contentRange);
-    }
+    const rewrittenLines = m3u8Content.split('\n').map(line => {
+      line = line.trim();
 
-    const acceptRanges = response.headers.get('accept-ranges');
-    if (acceptRanges) {
-      responseHeaders.set('Accept-Ranges', acceptRanges);
-    }
-    
-    // Cache control
-    if (contentType.includes('video') || contentType.includes('octet-stream')) {
-      responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
-    } else {
-      responseHeaders.set('Cache-Control', 'public, max-age=60');
-    }
+      if (line.length > 0 && !line.startsWith('#')) {
+        let absoluteUrl: string;
+        
+        if (line.startsWith('http://') || line.startsWith('https://')) {
+          absoluteUrl = line;
+        } else if (line.startsWith('/')) {
+          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${line}`;
+        } else {
+          const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+          absoluteUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${line}`;
+        }
+        
+        const encryptedToken = encryptUrl(absoluteUrl);
+        // CRITICAL FIX: Include API key in ALL proxied URLs
+        return `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
+      }
 
-    console.log('Successfully proxied stream segment');
+      if (line.startsWith('#EXT-X-KEY')) {
+        const uriMatch = line.match(/URI="([^"]+)"/);
+        if (uriMatch && uriMatch[1]) {
+          let absoluteKeyUrl: string;
+          const keyUrl = uriMatch[1];
+          
+          if (keyUrl.startsWith('http://') || keyUrl.startsWith('https://')) {
+            absoluteKeyUrl = keyUrl;
+          } else if (keyUrl.startsWith('/')) {
+            absoluteKeyUrl = `${baseUrl.protocol}//${baseUrl.host}${keyUrl}`;
+          } else {
+            const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+            absoluteKeyUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${keyUrl}`;
+          }
+          
+          const encryptedToken = encryptUrl(absoluteKeyUrl);
+          // CRITICAL FIX: Include API key in key URLs too
+          const proxiedKeyUrl = `/api/m3u8-proxy?token=${encryptedToken}&apiKey=${providedApiKey}`;
+          return line.replace(uriMatch[1], proxiedKeyUrl);
+        }
+      }
 
-    return new Response(response.body, {
-      status: response.status,
-      headers: responseHeaders,
+      return line;
     });
 
-  } catch (error: any) {
-    console.error('Proxy error:', {
-      message: error.message,
-      name: error.name,
+    const headers = new Headers({
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      'Cache-Control': 'public, max-age=60',
+      ...getCorsHeaders(origin),
     });
 
+    console.log('✅ M3U8 playlist rewritten successfully');
+    return new Response(rewrittenLines.join('\n'), { headers });
+
+  } catch (e: any) {
+    console.error('❌ Proxy error:', e);
     return new Response(
       JSON.stringify({ 
-        error: 'Proxy failed to fetch stream',
-        details: error.message,
+        error: 'Failed to proxy stream', 
+        details: e.message
       }),
-      {
-        status: 500,
-        headers: {
+      { 
+        status: 500, 
+        headers: { 
           'Content-Type': 'application/json',
           ...getCorsHeaders(origin),
-        }
+        } 
       }
     );
   }
-}
-
-// Helper function to resolve relative URLs
-function resolveUrl(target: string, baseUrl: URL, basePath: string): string {
-  // Absolute URL
-  if (target.startsWith('http://') || target.startsWith('https://')) {
-    return target;
-  }
-  
-  // Protocol-relative URL
-  if (target.startsWith('//')) {
-    return `${baseUrl.protocol}${target}`;
-  }
-  
-  // Absolute path
-  if (target.startsWith('/')) {
-    return `${baseUrl.protocol}//${baseUrl.host}${target}`;
-  }
-  
-  // Relative path
-  return `${baseUrl.protocol}//${baseUrl.host}${basePath}${target}`;
 }
