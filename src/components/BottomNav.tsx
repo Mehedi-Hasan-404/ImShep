@@ -1,4 +1,4 @@
-import { Home, Star } from 'lucide-react';
+import { Home, Star, MessageCircle } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 
 const BottomNav = () => {
@@ -14,6 +14,11 @@ const BottomNav = () => {
       path: '/favorites',
       icon: Star,
       label: 'Favorites',
+    },
+    {
+      path: '/contact',
+      icon: MessageCircle,
+      label: 'Contact',
     },
   ];
 
