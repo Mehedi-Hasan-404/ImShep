@@ -1,4 +1,6 @@
-// src/pages/CategoryChannels.tsx - NO API KEY IN FRONTEND
+// src/pages/CategoryChannels.tsx - SECURE VERSION
+// NO STREAM URLS EXPOSED TO FRONTEND
+
 import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -40,13 +42,14 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
     setFilteredChannels(filtered);
   }, [searchQuery, channels]);
 
-  const fetchM3UPlaylistServerSide = async (
+  // SECURE: Server returns only channel metadata, NO STREAM URLS
+  const fetchM3UPlaylistMetadata = async (
     categoryId: string, 
     categoryName: string, 
     m3uUrl: string
   ): Promise<PublicChannel[]> => {
     try {
-      const response = await fetch('/api/parse-m3u', {
+      const response = await fetch('/api/parse-m3u-metadata', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -60,13 +63,13 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch M3U playlist');
+        throw new Error(errorData.error || 'Failed to fetch M3U metadata');
       }
 
       const data = await response.json();
+      // Server returns channels WITHOUT streamUrl field
       return data.channels || [];
     } catch (error) {
-      // SECURITY: Don't log error
       throw error;
     }
   };
@@ -92,10 +95,10 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
 
       let allChannels: PublicChannel[] = [];
 
-      // Fetch M3U channels via server-side API
+      // Fetch M3U channel metadata (NO URLs)
       if (categoryData.m3uUrl) {
         try {
-          const m3uChannels = await fetchM3UPlaylistServerSide(
+          const m3uChannels = await fetchM3UPlaylistMetadata(
             categoryData.id,
             categoryData.name,
             categoryData.m3uUrl
@@ -106,16 +109,24 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
         }
       }
 
-      // Fetch manual channels
+      // Fetch manual channels (also without URLs in production)
       try {
         const channelsRef = collection(db, 'channels');
         const channelsQuery = query(channelsRef, where('categoryId', '==', categoryData.id));
         const channelsSnapshot = await getDocs(channelsQuery);
         
-        const manualChannels = channelsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as PublicChannel[];
+        const manualChannels = channelsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          // SECURITY: Remove streamUrl before sending to state
+          return {
+            id: doc.id,
+            name: data.name,
+            logoUrl: data.logoUrl,
+            categoryId: data.categoryId,
+            categoryName: data.categoryName,
+            // streamUrl is NOT included
+          } as PublicChannel;
+        });
 
         allChannels = [...allChannels, ...manualChannels];
       } catch (firestoreError) {
@@ -154,7 +165,7 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
     return (
       <ErrorBoundary>
         <div className="space-y-6">
-          <Button variant="ghost" className="mb-4" onClick={() => setLocation('/')} data-testid="button-back">
+          <Button variant="ghost" className="mb-4" onClick={() => setLocation('/')}>
             <ArrowLeft size={16} />
             Back
           </Button>
@@ -170,7 +181,7 @@ const CategoryChannels = ({ slug }: CategoryChannelsProps) => {
   return (
     <ErrorBoundary>
       <div className="space-y-6">
-        <Button variant="ghost" className="mb-4" onClick={() => setLocation('/')} data-testid="button-back">
+        <Button variant="ghost" className="mb-4" onClick={() => setLocation('/')}>
           <ArrowLeft size={16} />
           Back
         </Button>
