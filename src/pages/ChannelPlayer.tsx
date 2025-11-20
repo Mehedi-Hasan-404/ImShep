@@ -1,3 +1,4 @@
+// src/pages/ChannelPlayer.tsx - FIXED: Ensure all streams are proxied
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -28,13 +29,11 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // CRITICAL FIX: Add ref to scroll to top
   const topRef = useRef<HTMLDivElement>(null);
 
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const { addRecent } = useRecents();
 
-  // CRITICAL FIX: Scroll to top when channel changes
   useEffect(() => {
     if (channel && topRef.current) {
       topRef.current.scrollIntoView({ 
@@ -178,18 +177,32 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         for (const doc of channelsSnapshot.docs) {
           if (doc.id === decodedChannelId) {
             const channelData = doc.data();
+            
+            // 🔧 FIX: Validate that streamUrl exists before creating channel
+            if (!channelData.streamUrl || channelData.streamUrl.trim() === '') {
+              console.error('❌ Manual channel missing stream URL:', {
+                id: doc.id,
+                name: channelData.name
+              });
+              setError(`Channel "${channelData.name || 'Unknown'}" is missing a stream URL. Please add one in the admin panel.`);
+              setLoading(false);
+              return;
+            }
+            
             foundChannel = {
               id: doc.id,
               name: channelData.name || 'Unknown Channel',
               logoUrl: channelData.logoUrl || '/channel-placeholder.svg',
-              streamUrl: channelData.streamUrl || '',
+              streamUrl: channelData.streamUrl,
               categoryId: channelData.categoryId || '',
               categoryName: channelData.categoryName || 'Unknown Category'
             };
+            
             console.log('✅ Found MANUAL channel:', {
               id: foundChannel.id,
               name: foundChannel.name,
-              streamUrl: foundChannel.streamUrl.substring(0, 50) + '...'
+              streamUrl: foundChannel.streamUrl.substring(0, 50) + '...',
+              willBeProxied: foundChannel.streamUrl.includes('http')
             });
             break;
           }
@@ -238,8 +251,10 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
         return;
       }
 
-      if (!foundChannel.streamUrl) {
-        setError('Channel stream URL is missing or invalid.');
+      // 🔧 FIX: Final validation before setting channel
+      if (!foundChannel.streamUrl || foundChannel.streamUrl.trim() === '') {
+        setError(`Channel "${foundChannel.name}" has an invalid or missing stream URL.`);
+        setLoading(false);
         return;
       }
 
@@ -348,7 +363,9 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
     channelName: channel.name,
     originalUrl: channel.streamUrl.substring(0, 60) + '...',
     proxiedUrl: playerStreamUrl.substring(0, 60) + '...',
-    isProxied: playerStreamUrl.includes('/api/m3u8-proxy')
+    isProxied: playerStreamUrl.includes('/api/m3u8-proxy'),
+    urlType: channel.streamUrl.includes('.m3u8') ? 'HLS' : 
+             channel.streamUrl.includes('.mp4') ? 'MP4' : 'Unknown'
   });
 
   return (
