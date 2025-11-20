@@ -106,7 +106,7 @@ const Contact = () => {
       ),
       color: "from-blue-400 to-indigo-500",
       description: "Connect with us on the decentralized social network.",
-      link: "", // Add your link
+      link: "https://bsky.app/profile/mehedihasan1.bsky.social", // Add your link
       delay: 500
     }
   ];
