@@ -58,7 +58,7 @@ const Contact = () => {
       ),
       color: "from-blue-400 to-blue-600",
       description: "Join our channel for the latest updates and announcements.",
-      link: "#", // Add your link
+      link: "https://t.me/livetvproofficial", // Add your link
       delay: 100
     },
     {
@@ -70,7 +70,7 @@ const Contact = () => {
       ),
       color: "from-blue-600 to-blue-800",
       description: "Follow our page for news, events, and community highlights.",
-      link: "#", // Add your link
+      link: "https://www.facebook.com/MehedixHasan.4", // Add your link
       delay: 200
     },
     {
@@ -82,7 +82,7 @@ const Contact = () => {
       ),
       color: "from-pink-500 via-red-500 to-yellow-500",
       description: "Check out our latest stories and behind-the-scenes content.",
-      link: "#", // Add your link
+      link: "https://www.instagram.com/mehedihasan.404", // Add your link
       delay: 300
     },
     {
@@ -94,7 +94,7 @@ const Contact = () => {
       ),
       color: "from-gray-700 to-black",
       description: "Follow us for real-time updates and community discussions.",
-      link: "#", // Add your link
+      link: "https://x.com/mehedixhasan1", // Add your link
       delay: 400
     },
     {
@@ -106,7 +106,7 @@ const Contact = () => {
       ),
       color: "from-blue-400 to-indigo-500",
       description: "Connect with us on the decentralized social network.",
-      link: "#", // Add your link
+      link: "", // Add your link
       delay: 500
     }
   ];
