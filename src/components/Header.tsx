@@ -1,4 +1,4 @@
-import { Tv, Menu, Sun, Moon, Home, Star } from 'lucide-react';
+import { Tv, Menu, Sun, Moon, Home, Star, MessageCircle } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import { useTheme } from './ThemeProvider';
 
@@ -13,6 +13,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const navItems = [
     { path: '/', icon: Home, label: 'Home' },
     { path: '/favorites', icon: Star, label: 'Favorites' },
+    { path: '/contact', icon: MessageCircle, label: 'Contact' }, // Added Contact
   ];
 
   return (
