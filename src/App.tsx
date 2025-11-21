@@ -13,10 +13,11 @@ import { Analytics } from "@vercel/analytics/react";
 
 const Home = lazy(() => import("@/pages/Home"));
 const Favorites = lazy(() => import("@/pages/Favorites"));
+const Live = lazy(() => import("@/pages/Live")); // Import Live page
 const CategoryChannels = lazy(() => import("@/pages/CategoryChannels"));
 const ChannelPlayer = lazy(() => import("@/pages/ChannelPlayer"));
 const Admin = lazy(() => import("@/pages/Admin"));
-const Contact = lazy(() => import("@/pages/Contact")); // Import new page
+const Contact = lazy(() => import("@/pages/Contact"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -40,6 +41,9 @@ const App = () => (
                 <Switch>
                   <Route path="/">
                     <Layout><Home /></Layout>
+                  </Route>
+                  <Route path="/live">
+                    <Layout><Live /></Layout>
                   </Route>
                   <Route path="/favorites">
                     <Layout><Favorites /></Layout>
