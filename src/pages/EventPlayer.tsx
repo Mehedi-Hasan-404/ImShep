@@ -132,7 +132,7 @@ const EventPlayer = () => {
       <div className="container mx-auto p-4 md:p-6 max-w-4xl">
         <div className="mb-6 flex justify-between items-start">
             <div>
-                <h1 className="text-xl md:text-2xl font-bold text-white mb-2">{event.title}</h1>
+                <h1 className="text-xl md:text-2xl font-bold text-foreground mb-2">{event.title}</h1>
                 <div className="flex items-center gap-2 text-sm text-text-secondary">
                     <span className="text-accent font-bold px-2 py-0.5 bg-accent/10 rounded">{event.league}</span>
                     <span>•</span>
