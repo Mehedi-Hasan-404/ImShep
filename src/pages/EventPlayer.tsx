@@ -112,6 +112,7 @@ const EventPlayer = () => {
                 onBack={() => setLocation('/live')} 
                 onShare={handleShare}
                 autoPlay={true}
+                muted={false}
             />
         ) : (
             <div className="flex h-full items-center justify-center text-text-secondary flex-col gap-2">
