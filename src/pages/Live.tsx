@@ -1,9 +1,10 @@
 // src/pages/Live.tsx
 import { useEffect, useState } from 'react';
+import { Link } from 'wouter';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { LiveEvent } from '@/types';
-import { Loader2, PlayCircle, Calendar, Clock, Trophy, CheckCircle2 } from 'lucide-react';
+import { Loader2, PlayCircle, CheckCircle2, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type FilterType = 'all' | 'live' | 'recent' | 'upcoming';
@@ -23,7 +24,6 @@ const Live = () => {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        // Order by start time descending so newest are first
         const q = query(collection(db, 'live_events'), orderBy('startTime', 'asc'));
         const snapshot = await getDocs(q);
         setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LiveEvent)));
@@ -39,7 +39,6 @@ const Live = () => {
   // Filter Logic
   const filteredEvents = events.filter(event => {
     const eventTime = new Date(event.startTime).getTime();
-    // "Recent" is defined here as events that started in the past 24 hours but aren't marked live
     const isRecentTime = eventTime < now && eventTime > (now - 24 * 60 * 60 * 1000);
     
     switch (filter) {
@@ -55,7 +54,6 @@ const Live = () => {
     }
   });
 
-  // Counts for tabs
   const counts = {
     all: events.length,
     live: events.filter(e => e.isLive).length,
@@ -106,10 +104,15 @@ const Live = () => {
       <div className="space-y-4">
         {filteredEvents.length > 0 ? (
           filteredEvents.map(event => (
-            <MatchCard key={event.id} event={event} now={now} />
+            <Link key={event.id} to={`/live/${event.id}`}>
+              <div className="cursor-pointer block">
+                 <MatchCard event={event} now={now} />
+              </div>
+            </Link>
           ))
         ) : (
           <div className="text-center py-12 bg-card border border-border rounded-xl">
+            <Trophy className="mx-auto h-12 w-12 text-text-secondary opacity-50 mb-2" />
             <p className="text-text-secondary">No matches found in this category.</p>
           </div>
         )}
@@ -137,7 +140,7 @@ const FilterTab = ({
   >
     {icon}
     <span>{label}</span>
-    <span className="text-xs opacity-80">({count})</span>
+    {count > 0 && <span className="text-xs opacity-80">({count})</span>}
   </button>
 );
 
@@ -157,15 +160,10 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
   const secs = Math.floor((diff % (1000 * 60)) / 1000);
   const timerString = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
-  const openLink = (url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
   return (
     <div className="bg-[#0a0a0a] rounded-xl border border-border hover:border-emerald-500/50 transition-all duration-300 overflow-hidden relative group">
       {/* Header: League Info */}
       <div className="px-4 py-2 bg-white/5 flex items-center gap-2 border-b border-white/5">
-        {/* You can map categories to specific icons here if desired */}
         <Trophy size={14} className="text-emerald-400" />
         <span className="text-xs font-medium text-white/90 uppercase tracking-wide">
           {event.category} | {event.league}
@@ -176,7 +174,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
       <div className="p-4 flex items-center justify-between relative">
         
         {/* Team 1 */}
-        <div className="flex flex-col items-center gap-2 w-1/3">
+        <div className="flex flex-col items-center gap-2 w-1/3 z-10">
           <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white/5 p-2 flex items-center justify-center border border-white/10">
             <img 
               src={event.team1Logo} 
@@ -220,7 +218,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         </div>
 
         {/* Team 2 */}
-        <div className="flex flex-col items-center gap-2 w-1/3">
+        <div className="flex flex-col items-center gap-2 w-1/3 z-10">
           <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white/5 p-2 flex items-center justify-center border border-white/10">
             <img 
               src={event.team2Logo} 
@@ -233,21 +231,15 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         </div>
       </div>
 
-      {/* Links Overlay (Hover or Always Visible if needed) */}
-      {event.links && event.links.length > 0 && (
-        <div className="px-4 pb-4 pt-2 flex justify-center gap-2 flex-wrap">
-          {event.links.map((link, i) => (
-            <button
-              key={i}
-              onClick={() => openLink(link.url)}
-              className="flex items-center gap-1.5 bg-emerald-600/20 hover:bg-emerald-600 hover:text-white text-emerald-400 text-xs font-medium px-3 py-1.5 rounded-full transition-colors border border-emerald-600/30"
-            >
-              <PlayCircle size={12} />
-              {link.label}
-            </button>
-          ))}
+      {/* Hover Overlay */}
+      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20 backdrop-blur-[2px]">
+        <div className="flex flex-col items-center gap-2 transform scale-95 group-hover:scale-100 transition-transform duration-300">
+          <div className="bg-emerald-600 text-white rounded-full p-3 shadow-lg shadow-emerald-600/20">
+            <PlayCircle size={32} fill="currentColor" className="text-white" />
+          </div>
+          <span className="text-white font-bold text-xs tracking-widest uppercase">Click to Watch</span>
         </div>
-      )}
+      </div>
     </div>
   );
 };
