@@ -11,6 +11,7 @@ interface VideoPlayerProps {
   autoPlay?: boolean;
   muted?: boolean;
   className?: string;
+  onError?: () => void; // Added onError prop support
 }
 
 interface QualityLevel {
@@ -39,7 +40,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channelName,
   autoPlay = true,
   muted = true,
-  className = ""
+  className = "",
+  onError
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -192,6 +194,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     loadingTimeoutRef.current = setTimeout(() => {
       if (isMountedRef.current) {
         setPlayerState(prev => ({ ...prev, isLoading: false, error: "Stream took too long to load. Please try again.", showControls: false }));
+        if (onError) onError(); // Trigger retry
         destroyPlayer();
       }
     }, PLAYER_LOAD_TIMEOUT);
@@ -211,8 +214,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     } catch (error) {
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       setPlayerState(prev => ({ ...prev, isLoading: false, error: error instanceof Error ? error.message : 'Failed to initialize player', showControls: false }));
+      if (onError) onError(); // Trigger retry
     }
-  }, [streamUrl, autoPlay, muted, destroyPlayer, detectStreamType]);
+  }, [streamUrl, autoPlay, muted, destroyPlayer, detectStreamType, onError]);
 
   const initHlsPlayer = async (url: string, video: HTMLVideoElement) => {
     try {
@@ -231,7 +235,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           startPosition: -1,
           xhrSetup: (xhr: XMLHttpRequest, url: string) => {
             xhr.withCredentials = false;
-            // FIXED: Removed unsafe User-Agent header setting
           }
         });
         
@@ -260,6 +263,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     error: 'Network error: Unable to load stream',
                     showControls: false 
                   }));
+                  if (onError) onError(); // Trigger retry
                   destroyPlayer();
                 }
                 break;
@@ -275,6 +279,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   error: 'Playback error occurred',
                   showControls: false 
                 }));
+                if (onError) onError(); // Trigger retry
                 destroyPlayer();
                 break;
             }
@@ -344,6 +349,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         throw new Error('HLS is not supported in this browser');
       }
     } catch (error) { 
+      if (onError) onError();
       throw error; 
     }
   };
@@ -431,7 +437,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }
 
-      const onError = (event: any) => {
+      const onErrorHandler = (event: any) => {
         if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
         const errorCode = event.detail.code;
         let errorMessage = `Stream error occurred`;
@@ -450,11 +456,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         
         if (errorCode >= 6000 && errorCode < 7000) {
           setTimeout(() => handleRetry(), 2000);
+        } else {
+          if (onError) onError(); // Trigger retry for fatal errors
         }
         destroyPlayer();
       };
       
-      player.addEventListener('error', onError);
+      player.addEventListener('error', onErrorHandler);
       await player.load(url);
       
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
@@ -509,8 +517,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       
       updateCurrentQualityHeight();
       startControlsTimer();
-      return () => player.removeEventListener('error', onError);
+      return () => player.removeEventListener('error', onErrorHandler);
     } catch (error) { 
+      if (onError) onError();
       throw error; 
     }
   };
@@ -540,7 +549,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       updateCurrentQualityHeight();
       startControlsTimer();
     };
-    const onError = () => {
+    const onErrorHandler = () => {
       if (!isMountedRef.current) return;
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       setPlayerState(prev => ({ 
@@ -549,12 +558,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         error: 'Failed to load stream with native player',
         showControls: false,
       }));
+      if (onError) onError(); // Trigger retry
     };
     video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
-    video.addEventListener('error', onError, { once: true });
+    video.addEventListener('error', onErrorHandler, { once: true });
     return () => {
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      video.removeEventListener('error', onError);
+      video.removeEventListener('error', onErrorHandler);
     };
   };
 
