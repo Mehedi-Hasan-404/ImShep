@@ -1,4 +1,4 @@
-import { Tv, Menu, Sun, Moon, Home, Star, MessageCircle } from 'lucide-react';
+import { Tv, Menu, Sun, Moon, Home, Star, MessageCircle, Calendar } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import { useTheme } from './ThemeProvider';
 
@@ -12,16 +12,17 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
 
   const navItems = [
     { path: '/', icon: Home, label: 'Home' },
+    { path: '/live', icon: Calendar, label: 'Live' },
     { path: '/favorites', icon: Star, label: 'Favorites' },
-    { path: '/contact', icon: MessageCircle, label: 'Contact' }, // Added Contact
+    { path: '/contact', icon: MessageCircle, label: 'Contact' },
   ];
 
   return (
     <header className="app-header header-animate">
-      <div className="logo-section animate-fade-in">
+      <Link to="/" className="logo-section animate-fade-in cursor-pointer">
         <Tv size={24} className="text-accent hover-glow animate-pulse -translate-y-[2px]" />
         <span className="animate-slide-in-left">Live TV Pro</span>
-      </div>
+      </Link>
 
       {/* Desktop Navigation - hidden on mobile */}
       <nav className="hidden md:flex items-center gap-1">
