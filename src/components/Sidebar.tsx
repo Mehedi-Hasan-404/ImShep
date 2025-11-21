@@ -1,4 +1,4 @@
-import { X, Home, Star, MessageCircle, Tv } from 'lucide-react';
+import { X, Home, Star, MessageCircle, Tv, Calendar } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 
 interface SidebarProps {
@@ -10,21 +10,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const [location] = useLocation();
 
   const menuItems = [
-    {
-      path: '/',
-      icon: Home,
-      label: 'Home',
-    },
-    {
-      path: '/favorites',
-      icon: Star,
-      label: 'Favorites',
-    },
-    {
-      path: '/contact',
-      icon: MessageCircle,
-      label: 'Contact',
-    },
+    { path: '/', icon: Home, label: 'Home' },
+    { path: '/live', icon: Calendar, label: 'Live Events' },
+    { path: '/favorites', icon: Star, label: 'Favorites' },
+    { path: '/contact', icon: MessageCircle, label: 'Contact' },
   ];
 
   return (
@@ -79,7 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         <div className="mt-auto p-4 border-t border-border">
           <div className="text-xs text-text-secondary">
             <div>Live TV Pro</div>
-            <div>Version 1.0.0</div>
+            <div>Version 2.1.0</div>
           </div>
         </div>
       </div>
