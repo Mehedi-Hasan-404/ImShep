@@ -1,6 +1,6 @@
 // src/pages/EventPlayer.tsx
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'wouter'; // Ensure Link is imported
+import { useParams, Link } from 'wouter';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { LiveEvent } from '@/types';
@@ -55,21 +55,7 @@ const EventPlayer = () => {
       {/* Player Container */}
       <div className="w-full aspect-video bg-black relative sticky top-0 z-50 group">
         
-        {/* VIDEO PLAYER */}
-        {event.links.length > 0 ? (
-            <VideoPlayer 
-                key={currentLink.url} 
-                url={currentLink.url}
-                onError={handleVideoError}
-            />
-        ) : (
-            <div className="flex h-full items-center justify-center text-text-secondary flex-col gap-2">
-                <AlertCircle size={48} />
-                <p>No streams available for this event yet.</p>
-            </div>
-        )}
-
-        {/* BACK BUTTON - Moved AFTER VideoPlayer to ensure it sits on top */}
+        {/* BACK BUTTON - High Z-Index ensures it's clickable over the video */}
         <div className="absolute top-4 left-4 z-[60]">
             <Link to="/live">
               <div className="bg-black/50 hover:bg-accent/80 text-white p-2 rounded-full backdrop-blur-md transition-all cursor-pointer flex items-center justify-center shadow-lg border border-white/10">
@@ -77,6 +63,22 @@ const EventPlayer = () => {
               </div>
             </Link>
         </div>
+
+        {/* VIDEO PLAYER - Corrected Props */}
+        {event.links.length > 0 ? (
+            <VideoPlayer 
+                key={currentLink.url} 
+                streamUrl={currentLink.url}     // Corrected from 'url' to 'streamUrl'
+                channelName={event.title}       // Added required prop
+                onError={handleVideoError}      // Passed error handler
+                autoPlay={true}
+            />
+        ) : (
+            <div className="flex h-full items-center justify-center text-text-secondary flex-col gap-2">
+                <AlertCircle size={48} />
+                <p>No streams available for this event yet.</p>
+            </div>
+        )}
 
       </div>
 
