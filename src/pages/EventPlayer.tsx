@@ -1,18 +1,21 @@
 // src/pages/EventPlayer.tsx
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'wouter';
+import { useParams, useLocation } from 'wouter';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { LiveEvent } from '@/types';
 import VideoPlayer from '@/components/VideoPlayer';
-import { Loader2, AlertCircle, Check, Signal, ArrowLeft } from 'lucide-react';
+import { Loader2, AlertCircle, Check, Signal } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 const EventPlayer = () => {
   const { eventId } = useParams();
+  const [location, setLocation] = useLocation();
   const [event, setEvent] = useState<LiveEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentLinkIndex, setCurrentLinkIndex] = useState(0);
   const [autoRetry, setAutoRetry] = useState(true);
+  const { toast } = useToast();
 
   // Fetch Event Data
   useEffect(() => {
@@ -44,6 +47,30 @@ const EventPlayer = () => {
       setCurrentLinkIndex(0);
     }
   };
+  
+  // Share Handler
+  const handleShare = async () => {
+    if (!event) return;
+    const shareData = {
+      title: event.title,
+      text: `Watch ${event.title} live on ImShep!`,
+      url: window.location.href
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(window.location.href);
+        toast({
+            title: "Link copied",
+            description: "Event link copied to clipboard",
+        });
+      }
+    } catch (err) {
+      console.error("Error sharing:", err);
+    }
+  };
 
   if (loading) return <div className="flex h-screen items-center justify-center bg-black"><Loader2 className="animate-spin text-accent" /></div>;
   if (!event) return <div className="flex h-screen items-center justify-center bg-black text-white">Event not found</div>;
@@ -55,28 +82,27 @@ const EventPlayer = () => {
       {/* Player Container */}
       <div className="w-full aspect-video bg-black relative sticky top-0 z-50 group">
         
-        {/* BACK BUTTON - High Z-Index ensures it's clickable over the video */}
-        <div className="absolute top-4 left-4 z-[60]">
-            <Link to="/live">
-              <div className="bg-black/50 hover:bg-accent/80 text-white p-2 rounded-full backdrop-blur-md transition-all cursor-pointer flex items-center justify-center shadow-lg border border-white/10">
-                <ArrowLeft size={24} />
-              </div>
-            </Link>
-        </div>
-
-        {/* VIDEO PLAYER - Corrected Props */}
+        {/* VIDEO PLAYER */}
         {event.links.length > 0 ? (
             <VideoPlayer 
                 key={currentLink.url} 
-                streamUrl={currentLink.url}     // Corrected from 'url' to 'streamUrl'
-                channelName={event.title}       // Added required prop
-                onError={handleVideoError}      // Passed error handler
+                streamUrl={currentLink.url}
+                channelName={event.title}
+                onError={handleVideoError}
+                onBack={() => setLocation('/live')} 
+                onShare={handleShare}
                 autoPlay={true}
             />
         ) : (
             <div className="flex h-full items-center justify-center text-text-secondary flex-col gap-2">
                 <AlertCircle size={48} />
                 <p>No streams available for this event yet.</p>
+                <button 
+                  onClick={() => setLocation('/live')}
+                  className="mt-4 px-4 py-2 bg-accent/20 text-accent rounded-full hover:bg-accent/30 transition"
+                >
+                  Go Back
+                </button>
             </div>
         )}
 
