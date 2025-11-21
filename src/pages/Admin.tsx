@@ -755,7 +755,7 @@ const LiveEventsManager = () => {
           {/* Team 1 */}
           <div className="space-y-2">
             <label className="font-bold text-accent">Team 1 (Home)</label>
-            <input className="form-input" value={newEvent.team1Name} onChange={e => setNewEvent({...newEvent, team1Name: e.target.value})} placeholder="Name (e.g. India)" />
+            <input className="form-input" value={newEvent.team1Name} onChange={e => setNewEvent({...newEvent, team1Name: e.target.value})} placeholder="Name (e.g. Bangladesh)" />
             <input className="form-input" value={newEvent.team1Logo} onChange={e => setNewEvent({...newEvent, team1Logo: e.target.value})} placeholder="Logo URL" />
           </div>
 
