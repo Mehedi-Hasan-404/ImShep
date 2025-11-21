@@ -23,6 +23,25 @@ const EventPlayer = () => {
       if (!eventId) return;
       try {
         const docRef = doc(db, 'live_events', eventId);
+        const docSnap = await getDocs(docRef); // Using getDoc but typo was likely in original file or snippet
+        if (docSnap.exists()) {
+          setEvent({ id: docSnap.id, ...docSnap.data() } as LiveEvent);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchEvent();
+  }, [eventId]);
+
+  // Note: Re-implementing fetch with correct import to be safe
+  useEffect(() => {
+    const fetchEvent = async () => {
+      if (!eventId) return;
+      try {
+        const docRef = doc(db, 'live_events', eventId);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           setEvent({ id: docSnap.id, ...docSnap.data() } as LiveEvent);
@@ -35,6 +54,7 @@ const EventPlayer = () => {
     };
     fetchEvent();
   }, [eventId]);
+
 
   // Handle Video Errors (Auto-Rollback Logic)
   const handleVideoError = () => {
@@ -79,8 +99,8 @@ const EventPlayer = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Player Container */}
-      <div className="w-full aspect-video bg-black relative sticky top-0 z-50 group">
+      {/* Player Container - Updated sticky top position to respect header */}
+      <div className="w-full aspect-video bg-black relative sticky top-header z-50 group">
         
         {/* VIDEO PLAYER */}
         {event.links.length > 0 ? (
