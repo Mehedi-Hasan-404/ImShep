@@ -50,7 +50,7 @@ export interface RecentChannel {
   watchedAt: number;
 }
 
-// New Types for Live Events
+// --- UPDATED TYPES FOR LIVE EVENTS ---
 export interface LiveEventLink {
   label: string;
   url: string;
@@ -58,10 +58,13 @@ export interface LiveEventLink {
 
 export interface LiveEvent {
   id: string;
-  title: string;
-  description: string;
-  bannerUrl: string;
-  startTime: string; // ISO string
-  isLive: boolean;
+  category: string; // e.g., "Cricket", "Football"
+  league: string;   // e.g., "Bangladesh Premier League"
+  team1Name: string;
+  team1Logo: string;
+  team2Name: string;
+  team2Logo: string;
+  startTime: string; // ISO string date
+  isLive: boolean;   // Force live status
   links: LiveEventLink[];
 }
