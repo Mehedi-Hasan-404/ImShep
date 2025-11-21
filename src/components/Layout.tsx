@@ -12,8 +12,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [location] = useLocation();
   
-  // Update logic to show bottom nav on contact page as well
-  const showBottomNav = location === '/' || location === '/favorites' || location === '/contact';
+  // Logic to show bottom nav
+  const showBottomNav = ['/', '/favorites', '/contact', '/live'].includes(location);
 
   return (
     <div className="min-h-screen bg-background">
