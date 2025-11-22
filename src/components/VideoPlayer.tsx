@@ -388,7 +388,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           dash: {
             clockSyncUri: '',
             ignoreDrmInfo: false,
-            sequenceMode: true,
+            sequenceMode: false,
             timeShiftBufferDepth: 60,
           },
         },
