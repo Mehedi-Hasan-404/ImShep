@@ -15,7 +15,6 @@ const Live = () => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [now, setNow] = useState(Date.now());
 
-  // Update "now" every second to keep timers accurate
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -36,31 +35,22 @@ const Live = () => {
     fetchEvents();
   }, []);
 
-  // --- SORTING & FILTERING LOGIC ---
+  // --- UPDATED SORTING LOGIC ---
   const getProcessedEvents = () => {
-    // 1. Filter first
     let filtered = events.filter(event => {
       const eventTime = new Date(event.startTime).getTime();
-      // Recent is defined as ended within the last 24 hours
       const isRecentTime = eventTime < now && eventTime > (now - 24 * 60 * 60 * 1000);
       
       switch (filter) {
-        case 'live':
-          return event.isLive;
-        case 'upcoming':
-          return eventTime > now && !event.isLive;
-        case 'recent':
-          return isRecentTime && !event.isLive;
-        case 'all':
-        default:
-          return true;
+        case 'live': return event.isLive;
+        case 'upcoming': return eventTime > now && !event.isLive;
+        case 'recent': return isRecentTime && !event.isLive;
+        case 'all': default: return true;
       }
     });
 
-    // 2. Sort based on requirements
-    // Order: Live -> Upcoming (Ascending) -> Recent (Descending/Newest ended first)
     return filtered.sort((a, b) => {
-      // Always prioritize LIVE events at the very top
+      // 1. Live events always first
       if (a.isLive && !b.isLive) return -1;
       if (!a.isLive && b.isLive) return 1;
       
@@ -69,17 +59,14 @@ const Live = () => {
       const isUpcomingA = timeA > now;
       const isUpcomingB = timeB > now;
 
-      // If both are Live, sort by start time
-      if (a.isLive && b.isLive) return timeA - timeB;
+      // 2. Upcoming events come before Recent events
+      if (isUpcomingA && !isUpcomingB) return -1;
+      if (!isUpcomingA && isUpcomingB) return 1;
 
-      // If comparing Upcoming vs Recent
-      if (isUpcomingA && !isUpcomingB) return -1; // Upcoming comes before Recent
-      if (!isUpcomingA && isUpcomingB) return 1;  // Recent comes after Upcoming
-
-      // If both are Upcoming, sort ASC (soonest first)
+      // 3. Upcoming: Sort Ascending (Soonest first)
       if (isUpcomingA && isUpcomingB) return timeA - timeB;
 
-      // If both are Recent/Past, sort DESC (most recently ended first)
+      // 4. Recent: Sort Descending (Newest ended first)
       return timeB - timeA;
     });
   };
@@ -101,7 +88,6 @@ const Live = () => {
 
   return (
     <div className="container mx-auto p-4 md:p-6 max-w-3xl space-y-6">
-      {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         <FilterTab 
           active={filter === 'all'} 
@@ -116,7 +102,8 @@ const Live = () => {
           label="Live" 
           count={counts.live}
           activeClass="bg-red-600 border-red-500 text-white"
-          icon={<div className="w-2 h-2 rounded-full bg-white animate-pulse" />}
+          // FIX 1: Conditional color for the live dot (Red when inactive/white-bg, White when active/red-bg)
+          icon={<div className={cn("w-2 h-2 rounded-full animate-pulse", filter === 'live' ? "bg-white" : "bg-red-500")} />}
         />
         <FilterTab 
           active={filter === 'recent'} 
@@ -132,10 +119,11 @@ const Live = () => {
         />
       </div>
       
-      {/* Events Grid */}
+      {/* FIX 3: Use flex-col gap-4 instead of space-y-4 for more consistent spacing with links */}
       <div className="flex flex-col gap-4">
         {processedEvents.length > 0 ? (
           processedEvents.map(event => (
+            // FIX 3: Added className="block" to ensure Link behaves like a block element for spacing
             <Link key={event.id} to={`/live/${event.id}`} className="block">
                  <MatchCard event={event} now={now} />
             </Link>
@@ -178,12 +166,10 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
   const eventTime = new Date(event.startTime).getTime();
   const isUpcoming = eventTime > now && !event.isLive;
   
-  // Format Time/Date
   const dateObj = new Date(event.startTime);
   const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const dateString = dateObj.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
   
-  // Timer Logic
   const diff = Math.abs(now - eventTime);
   const hours = Math.floor(diff / (1000 * 60 * 60));
   const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -191,8 +177,8 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
   const timerString = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
   return (
+    // FIX 2: Changed bg-[#0a0a0a] to bg-card for theme support
     <div className="bg-card rounded-xl border border-border hover:border-accent/50 transition-all duration-300 overflow-hidden relative group shadow-sm">
-      {/* Header: League Info - dynamic background color based on theme */}
       <div className="px-4 py-2 bg-muted/50 border-b border-border flex items-center gap-2">
         <Trophy size={14} className="text-accent" />
         <span className="text-xs font-medium text-foreground/90 uppercase tracking-wide">
@@ -200,10 +186,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         </span>
       </div>
 
-      {/* Main Body: Teams */}
       <div className="p-4 flex items-center justify-between relative">
-        
-        {/* Team 1 */}
         <div className="flex flex-col items-center gap-2 w-1/3 z-10">
           <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted/30 p-2 flex items-center justify-center border border-border/50">
             <img 
@@ -216,7 +199,6 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
           <span className="text-sm font-bold text-center leading-tight text-foreground">{event.team1Name}</span>
         </div>
 
-        {/* Center Info */}
         <div className="flex flex-col items-center justify-center w-1/3 z-10">
           {event.isLive ? (
             <>
@@ -247,7 +229,6 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
           )}
         </div>
 
-        {/* Team 2 */}
         <div className="flex flex-col items-center gap-2 w-1/3 z-10">
           <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted/30 p-2 flex items-center justify-center border border-border/50">
             <img 
@@ -261,7 +242,6 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         </div>
       </div>
 
-      {/* Hover Overlay */}
       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20 backdrop-blur-[1px]">
         <div className="flex flex-col items-center gap-2 transform scale-95 group-hover:scale-100 transition-transform duration-300">
           <div className="bg-accent text-white rounded-full p-3 shadow-lg shadow-accent/20">
