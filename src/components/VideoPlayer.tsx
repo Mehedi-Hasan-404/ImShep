@@ -95,29 +95,57 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-  // Helper to determine real duration, handling Shaka's Infinity issue
+  /**
+   * Smartly determines the duration. 
+   * Even if the browser reports Infinity (Live), it checks seekable ranges 
+   * to find a finite end time, converting it to "Hours:Minutes:Seconds" format.
+   */
   const getSmartDuration = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return { duration: 0, isLive: false };
 
-    let duration = video.duration || 0;
-    let isLive = !isFinite(duration);
-
-    // If native duration is Infinity, ask Shaka for the seek range
-    if (isLive && playerTypeRef.current === 'shaka' && shakaPlayerRef.current) {
-      try {
-        const range = shakaPlayerRef.current.seekRange();
-        // If the stream starts near 0 and has a finite end, treat it as VOD (not Live)
-        // This fixes DASH streams that report as dynamic but are actually VOD
-        if (range && range.start < 1 && isFinite(range.end) && range.end > 0) {
-          duration = range.end;
-          isLive = false; 
-        }
-      } catch (e) {
-        // Fallback to existing state if check fails
-      }
+    let duration = video.duration;
+    
+    // 1. Check Native Duration
+    if (isFinite(duration) && duration > 0) {
+      return { duration, isLive: false };
     }
 
-    return { duration: isLive ? Infinity : duration, isLive };
+    // 2. Check Shaka Player Seek Range (Specific for DASH)
+    if (playerTypeRef.current === 'shaka' && shakaPlayerRef.current) {
+      try {
+        const range = shakaPlayerRef.current.seekRange();
+        // If we have a valid range end that isn't zero
+        if (range && isFinite(range.end) && range.end > 0) {
+          // If the start is near 0, it's definitely a VOD. 
+          // Even if start > 0 (DVR), we can treat range.end as duration for display.
+          return { duration: range.end, isLive: false };
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // 3. Check HTML5 Seekable Ranges (Universal fallback)
+    if (video.seekable && video.seekable.length > 0) {
+      try {
+        const seekableEnd = video.seekable.end(video.seekable.length - 1);
+        if (isFinite(seekableEnd) && seekableEnd > 0) {
+           return { duration: seekableEnd, isLive: false };
+        }
+      } catch (e) { /* ignore */ }
+    }
+    
+    // 4. Check Buffered Ranges (Last resort fallback)
+    if (video.buffered && video.buffered.length > 0) {
+       try {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        if (isFinite(bufferedEnd) && bufferedEnd > 0) {
+            // If we have buffered significantly, assume that's the duration so far
+            return { duration: bufferedEnd, isLive: false };
+        }
+       } catch (e) { /* ignore */ }
+    }
+
+    // Truly Live or broken
+    return { duration: Infinity, isLive: true };
   }, []);
 
   const detectStreamType = useCallback((url: string): { type: 'hls' | 'dash' | 'native'; cleanUrl: string; drmInfo?: any } => {
@@ -267,30 +295,47 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         });
         
         hlsRef.current = hls;
+        
         let retryCount = 0;
         const maxRetries = 3;
         
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!isMountedRef.current) return;
+          
           if (data.fatal) {
             if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+            
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 if (retryCount < maxRetries) {
                   retryCount++;
-                  setTimeout(() => { hls.startLoad(); }, 1000 * retryCount);
+                  setTimeout(() => {
+                    hls.startLoad();
+                  }, 1000 * retryCount);
                 } else {
-                  setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Network error: Unable to load stream', showControls: false }));
-                  if (onError) onError();
+                  setPlayerState(prev => ({ 
+                    ...prev, 
+                    isLoading: false, 
+                    error: 'Network error: Unable to load stream',
+                    showControls: false 
+                  }));
+                  if (onError) onError(); 
                   destroyPlayer();
                 }
                 break;
+                
               case Hls.ErrorTypes.MEDIA_ERROR:
                 hls.recoverMediaError();
                 break;
+                
               default:
-                setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Playback error occurred', showControls: false }));
-                if (onError) onError();
+                setPlayerState(prev => ({ 
+                  ...prev, 
+                  isLoading: false, 
+                  error: 'Playback error occurred',
+                  showControls: false 
+                }));
+                if (onError) onError(); 
                 destroyPlayer();
                 break;
             }
@@ -323,10 +368,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           
           video.muted = muted;
           if (autoPlay) {
-            video.play().catch(() => { setPlayerState(prev => ({ ...prev, isPlaying: false })); });
+            video.play().catch(err => {
+              setPlayerState(prev => ({ ...prev, isPlaying: false }));
+            });
           }
 
-          // Use smart duration logic
+          // Use Smart Duration Check
           const { duration, isLive } = getSmartDuration(video);
           
           setPlayerState(prev => ({ 
@@ -393,7 +440,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           dash: {
             clockSyncUri: '',
             ignoreDrmInfo: false,
-            sequenceMode: false, // Critical for VOD duration
+            sequenceMode: false, // Must be false for VOD duration to work
             timeShiftBufferDepth: 60,
           },
         },
@@ -505,6 +552,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.muted = muted;
       if (autoPlay) video.play().catch(() => {});
 
+      // Use Smart Duration Check
       const { duration, isLive } = getSmartDuration(video);
       
       setPlayerState(prev => ({ 
@@ -518,7 +566,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         currentAudioTrack: 0,
         isMuted: video.muted, 
         isPlaying: true, 
-        showControls: true,
+        showControls: true, 
         isLive: isLive,
         duration: duration,
       }));
@@ -540,6 +588,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.muted = muted;
       if (autoPlay) video.play().catch(console.warn);
 
+      // Use Smart Duration Check
       const { duration, isLive } = getSmartDuration(video);
       
       setPlayerState(prev => ({ 
@@ -688,9 +737,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handleWaiting = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: true })); };
     const handlePlaying = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: false, isPlaying: true })); lastActivityRef.current = Date.now(); };
     
+    // CONSTANTLY CHECK FOR DURATION UPDATES
     const updateStateWithTime = () => {
         if (!isMountedRef.current || !video) return;
         const buffered = video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : 0;
+        
+        // Use smart check to see if we can convert "Live" to a timestamp
         const { duration, isLive } = getSmartDuration(video);
         
         setPlayerState(prev => ({ 
@@ -890,11 +942,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const togglePlay = useCallback(() => {
     const video = videoRef.current; 
     if (!video) return; 
+    
     if (video.paused) {
       video.play().catch(console.error); 
     } else {
       video.pause(); 
     } 
+    
     setPlayerState(prev => ({ ...prev, showControls: true })); 
     lastActivityRef.current = Date.now();
   }, []);
@@ -955,16 +1009,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const toggleFullscreen = useCallback(async () => {
     const container = containerRef.current;
     if (!container) return;
+    
     try {
       if (document.fullscreenElement) {
         await document.exitFullscreen();
         if (screen.orientation && 'unlock' in screen.orientation) {
-          try { (screen.orientation as any).unlock(); } catch (e) { }
+          try {
+            (screen.orientation as any).unlock();
+          } catch (e) { }
         }
       } else {
         await container.requestFullscreen();
         if (screen.orientation && 'lock' in screen.orientation && isMobile) {
-          try { await (screen.orientation as any).lock('landscape').catch(() => {}); } catch (e) { }
+          try {
+            await (screen.orientation as any).lock('landscape').catch(() => {});
+          } catch (e) { }
         }
       }
     } catch (error) { }
@@ -975,6 +1034,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const togglePip = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !document.pictureInPictureEnabled) return;
+    
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
@@ -1070,49 +1130,84 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     
     if (isFullscreenLandscape) {
       return {
-        iconSmall: 28, iconMedium: 32, iconLarge: 36,
-        centerButtonClass: 'w-24 h-24', centerIcon: 40,
-        paddingClass: 'p-4', gapClass: 'gap-4', textClass: 'text-lg',
-        progressBarClass: 'h-2', progressThumbClass: 'w-5 h-5', progressInsetClass: 'left-2.5 right-2.5', 
+        iconSmall: 28,
+        iconMedium: 32,
+        iconLarge: 36,
+        centerButtonClass: 'w-24 h-24',
+        centerIcon: 40,
+        paddingClass: 'p-4',
+        gapClass: 'gap-4',
+        textClass: 'text-lg',
+        progressBarClass: 'h-2',
+        progressThumbClass: 'w-5 h-5',
+        progressInsetClass: 'left-2.5 right-2.5', 
         containerPaddingClass: 'p-6'
       };
     }
     
     if (isMobileLandscape) {
       return {
-        iconSmall: 22, iconMedium: 26, iconLarge: 28,
-        centerButtonClass: 'w-20 h-20', centerIcon: 32,
-        paddingClass: 'p-3', gapClass: 'gap-2', textClass: 'text-base',
-        progressBarClass: 'h-1.5', progressThumbClass: 'w-4 h-4', progressInsetClass: 'left-2 right-2', 
+        iconSmall: 22,
+        iconMedium: 26,
+        iconLarge: 28,
+        centerButtonClass: 'w-20 h-20',
+        centerIcon: 32,
+        paddingClass: 'p-3',
+        gapClass: 'gap-2',
+        textClass: 'text-base',
+        progressBarClass: 'h-1.5',
+        progressThumbClass: 'w-4 h-4',
+        progressInsetClass: 'left-2 right-2', 
         containerPaddingClass: 'p-4'
       };
     }
     
     if (isMobilePortrait) {
       return {
-        iconSmall: 18, iconMedium: 22, iconLarge: 24,
-        centerButtonClass: 'w-16 h-16', centerIcon: 28,
-        paddingClass: 'p-2', gapClass: 'gap-2', textClass: 'text-sm',
-        progressBarClass: 'h-1', progressThumbClass: 'w-3 h-3', progressInsetClass: 'left-1.5 right-1.5', 
+        iconSmall: 18,
+        iconMedium: 22,
+        iconLarge: 24,
+        centerButtonClass: 'w-16 h-16',
+        centerIcon: 28,
+        paddingClass: 'p-2',
+        gapClass: 'gap-2',
+        textClass: 'text-sm',
+        progressBarClass: 'h-1',
+        progressThumbClass: 'w-3 h-3',
+        progressInsetClass: 'left-1.5 right-1.5', 
         containerPaddingClass: 'p-3'
       };
     }
     
     if (isTablet) {
       return {
-        iconSmall: 22, iconMedium: 26, iconLarge: 28,
-        centerButtonClass: 'w-20 h-20', centerIcon: 32,
-        paddingClass: 'p-3', gapClass: 'gap-3', textClass: 'text-base',
-        progressBarClass: 'h-1.5', progressThumbClass: 'w-4 h-4', progressInsetClass: 'left-2 right-2', 
+        iconSmall: 22,
+        iconMedium: 26,
+        iconLarge: 28,
+        centerButtonClass: 'w-20 h-20',
+        centerIcon: 32,
+        paddingClass: 'p-3',
+        gapClass: 'gap-3',
+        textClass: 'text-base',
+        progressBarClass: 'h-1.5',
+        progressThumbClass: 'w-4 h-4',
+        progressInsetClass: 'left-2 right-2', 
         containerPaddingClass: 'p-4'
       };
     }
     
     return {
-      iconSmall: 20, iconMedium: 24, iconLarge: 26,
-      centerButtonClass: 'w-16 h-16', centerIcon: 28,
-      paddingClass: 'p-2', gapClass: 'gap-3', textClass: 'text-sm',
-      progressBarClass: 'h-1', progressThumbClass: 'w-3 h-3', progressInsetClass: 'left-1.5 right-1.5', 
+      iconSmall: 20,
+      iconMedium: 24,
+      iconLarge: 26,
+      centerButtonClass: 'w-16 h-16',
+      centerIcon: 28,
+      paddingClass: 'p-2',
+      gapClass: 'gap-3',
+      textClass: 'text-sm',
+      progressBarClass: 'h-1',
+      progressThumbClass: 'w-3 h-3',
+      progressInsetClass: 'left-1.5 right-1.5', 
       containerPaddingClass: 'p-4'
     };
   };
@@ -1159,6 +1254,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       
       {!playerState.error && (
         <div className={`absolute inset-0 transition-opacity duration-300 ${playerState.showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          {/* Top Control Bar */}
           <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent z-20 flex justify-between items-start">
             {onBack && (
               <button 
@@ -1209,6 +1305,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           )}
           
+          {/* Bottom Controls */}
           <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent ${sizes.containerPaddingClass} flex flex-col`} style={{ maxHeight: isMobile ? '35%' : '30%' }}>
             <div className="mb-2 md:mb-3 flex-shrink-0">
               <div ref={progressRef} className="relative h-2 py-2 -my-2 bg-transparent cursor-pointer group" onClick={handleProgressClick} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
@@ -1350,6 +1447,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </div>
 
+                  {/* Mobile Center Controls (Play/Pause logic is handled by center overlay, but seek buttons here) */}
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}>
                     <button 
                       onClick={(e) => { e.stopPropagation(); seekBackward(); }} 
