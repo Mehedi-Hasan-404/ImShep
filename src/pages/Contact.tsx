@@ -1,3 +1,4 @@
+// /src/pages/Contact.tsx
 import { Mail, ExternalLink } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
@@ -53,12 +54,12 @@ const Contact = () => {
       name: "Telegram",
       icon: (
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-          <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.628 0zm4.955 16.654c-.23.667-1.152.836-1.944.537-2.46-1.023-3.646-1.77-5.24-2.67-.48-.276-.76-.406-.752-.634.006-.22.326-.347.634-.464.818-.31 1.708-.63 2.186-.846 1.76-.795 3.554-1.625 4.565-2.07.91-.4 1.635-.69 2.075-.65.12.01.27.05.38.13.09.07.18.18.22.32.05.15.08.35.02.57-.45 1.67-1.3 5.29-1.625 6.95-.17.89-.46 1.43-.75 1.74z" />
+          <path d="M21.68 3.084L1.91 10.703c-1.35.54-1.35 1.303-.246 1.64l5.057 1.577 11.716-7.388c.552-.336 1.058-.155.642.214l-9.49 8.56-.372 5.185c.546 0 .787-.25.93-.413l2.623-2.55 5.453 4.028c1.005.554 1.727.269 1.977-.92l3.575-16.86c.366-1.468-.56-2.132-1.516-1.707z" />
         </svg>
       ),
       color: "from-blue-400 to-blue-600",
       description: "Join our channel for the latest updates and announcements.",
-      link: "https://t.me/livetvprochat", // Add your link
+      link: "https://t.me/livetvprochat",
       delay: 100
     },
     {
@@ -70,7 +71,7 @@ const Contact = () => {
       ),
       color: "from-blue-600 to-blue-800",
       description: "Follow our page for news, events, and community highlights.",
-      link: "https://www.facebook.com/MehedixHasan.4", // Add your link
+      link: "https://www.facebook.com/MehedixHasan.4",
       delay: 200
     },
     {
@@ -82,7 +83,7 @@ const Contact = () => {
       ),
       color: "from-pink-500 via-red-500 to-yellow-500",
       description: "Check out our latest stories and behind-the-scenes content.",
-      link: "https://www.instagram.com/mehedihasan.404", // Add your link
+      link: "https://www.instagram.com/mehedihasan.404",
       delay: 300
     },
     {
@@ -94,7 +95,7 @@ const Contact = () => {
       ),
       color: "from-gray-700 to-black",
       description: "Follow us for real-time updates and community discussions.",
-      link: "https://x.com/mehedixhasan1", // Add your link
+      link: "https://x.com/mehedixhasan1",
       delay: 400
     },
     {
@@ -106,7 +107,7 @@ const Contact = () => {
       ),
       color: "from-blue-400 to-indigo-500",
       description: "Connect with us on the decentralized social network.",
-      link: "https://bsky.app/profile/mehedihasan1.bsky.social", // Add your link
+      link: "https://bsky.app/profile/mehedihasan1.bsky.social",
       delay: 500
     }
   ];
