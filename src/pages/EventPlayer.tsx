@@ -1,5 +1,5 @@
 // src/pages/EventPlayer.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react'; // Add useRef
 import { useParams, useLocation } from 'wouter';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -15,28 +15,13 @@ const EventPlayer = () => {
   const [loading, setLoading] = useState(true);
   const [currentLinkIndex, setCurrentLinkIndex] = useState(0);
   const [autoRetry, setAutoRetry] = useState(true);
+  
+  // Track which links have failed to avoid infinite loops
+  const failedLinksRef = useRef<Set<number>>(new Set());
+  
   const { toast } = useToast();
 
   // Fetch Event Data
-  useEffect(() => {
-    const fetchEvent = async () => {
-      if (!eventId) return;
-      try {
-        const docRef = doc(db, 'live_events', eventId);
-        const docSnap = await getDocs(docRef); // Using getDoc but typo was likely in original file or snippet
-        if (docSnap.exists()) {
-          setEvent({ id: docSnap.id, ...docSnap.data() } as LiveEvent);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchEvent();
-  }, [eventId]);
-
-  // Note: Re-implementing fetch with correct import to be safe
   useEffect(() => {
     const fetchEvent = async () => {
       if (!eventId) return;
@@ -55,15 +40,32 @@ const EventPlayer = () => {
     fetchEvent();
   }, [eventId]);
 
+  // Reset failed links when user manually changes source
+  const handleManualSourceChange = (index: number) => {
+    failedLinksRef.current.clear();
+    setAutoRetry(true);
+    setCurrentLinkIndex(index);
+  };
 
-  // Handle Video Errors (Auto-Rollback Logic)
+  // Handle Video Errors (Smart Rollback Logic)
   const handleVideoError = () => {
     if (!event || !autoRetry) return;
-    console.log(`Link ${currentLinkIndex + 1} failed. Trying next...`);
+
+    // Mark current link as failed
+    failedLinksRef.current.add(currentLinkIndex);
+    console.log(`Link ${currentLinkIndex + 1} failed.`);
+
+    // Check if we have tried all links
+    if (failedLinksRef.current.size >= event.links.length) {
+      console.log("All links failed. Stopping auto-retry.");
+      setAutoRetry(false); // STOP the loop to show the error message
+      return;
+    }
+
+    // Try next link
     if (currentLinkIndex < event.links.length - 1) {
       setCurrentLinkIndex(prev => prev + 1);
     } else {
-      console.log("All links failed. Restarting loop.");
       setCurrentLinkIndex(0);
     }
   };
@@ -99,7 +101,7 @@ const EventPlayer = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Player Container - Updated sticky top position to respect header */}
+      {/* Player Container */}
       <div className="w-full aspect-video bg-black relative sticky top-header z-50 group">
         
         {/* VIDEO PLAYER */}
@@ -153,7 +155,7 @@ const EventPlayer = () => {
                 {event.links.map((link, index) => (
                     <button
                         key={index}
-                        onClick={() => setCurrentLinkIndex(index)}
+                        onClick={() => handleManualSourceChange(index)} 
                         className={`relative flex items-center justify-between p-3 rounded-lg border transition-all ${
                             currentLinkIndex === index 
                             ? 'bg-accent/10 border-accent text-accent shadow-[0_0_10px_rgba(16,185,129,0.2)]' 
