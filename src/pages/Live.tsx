@@ -36,23 +36,55 @@ const Live = () => {
     fetchEvents();
   }, []);
 
-  // Filter Logic
-  const filteredEvents = events.filter(event => {
-    const eventTime = new Date(event.startTime).getTime();
-    const isRecentTime = eventTime < now && eventTime > (now - 24 * 60 * 60 * 1000);
-    
-    switch (filter) {
-      case 'live':
-        return event.isLive;
-      case 'upcoming':
-        return eventTime > now && !event.isLive;
-      case 'recent':
-        return isRecentTime && !event.isLive;
-      case 'all':
-      default:
-        return true;
-    }
-  });
+  // --- SORTING & FILTERING LOGIC ---
+  const getProcessedEvents = () => {
+    // 1. Filter first
+    let filtered = events.filter(event => {
+      const eventTime = new Date(event.startTime).getTime();
+      // Recent is defined as ended within the last 24 hours
+      const isRecentTime = eventTime < now && eventTime > (now - 24 * 60 * 60 * 1000);
+      
+      switch (filter) {
+        case 'live':
+          return event.isLive;
+        case 'upcoming':
+          return eventTime > now && !event.isLive;
+        case 'recent':
+          return isRecentTime && !event.isLive;
+        case 'all':
+        default:
+          return true;
+      }
+    });
+
+    // 2. Sort based on requirements
+    // Order: Live -> Upcoming (Ascending) -> Recent (Descending/Newest ended first)
+    return filtered.sort((a, b) => {
+      // Always prioritize LIVE events at the very top
+      if (a.isLive && !b.isLive) return -1;
+      if (!a.isLive && b.isLive) return 1;
+      
+      const timeA = new Date(a.startTime).getTime();
+      const timeB = new Date(b.startTime).getTime();
+      const isUpcomingA = timeA > now;
+      const isUpcomingB = timeB > now;
+
+      // If both are Live, sort by start time
+      if (a.isLive && b.isLive) return timeA - timeB;
+
+      // If comparing Upcoming vs Recent
+      if (isUpcomingA && !isUpcomingB) return -1; // Upcoming comes before Recent
+      if (!isUpcomingA && isUpcomingB) return 1;  // Recent comes after Upcoming
+
+      // If both are Upcoming, sort ASC (soonest first)
+      if (isUpcomingA && isUpcomingB) return timeA - timeB;
+
+      // If both are Recent/Past, sort DESC (most recently ended first)
+      return timeB - timeA;
+    });
+  };
+
+  const processedEvents = getProcessedEvents();
 
   const counts = {
     all: events.length,
@@ -101,13 +133,11 @@ const Live = () => {
       </div>
       
       {/* Events Grid */}
-      <div className="space-y-4">
-        {filteredEvents.length > 0 ? (
-          filteredEvents.map(event => (
-            <Link key={event.id} to={`/live/${event.id}`}>
-              <div className="cursor-pointer block">
+      <div className="flex flex-col gap-4">
+        {processedEvents.length > 0 ? (
+          processedEvents.map(event => (
+            <Link key={event.id} to={`/live/${event.id}`} className="block">
                  <MatchCard event={event} now={now} />
-              </div>
             </Link>
           ))
         ) : (
@@ -161,11 +191,11 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
   const timerString = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
   return (
-    <div className="bg-[#0a0a0a] rounded-xl border border-border hover:border-emerald-500/50 transition-all duration-300 overflow-hidden relative group">
-      {/* Header: League Info */}
-      <div className="px-4 py-2 bg-white/5 flex items-center gap-2 border-b border-white/5">
-        <Trophy size={14} className="text-emerald-400" />
-        <span className="text-xs font-medium text-white/90 uppercase tracking-wide">
+    <div className="bg-card rounded-xl border border-border hover:border-accent/50 transition-all duration-300 overflow-hidden relative group shadow-sm">
+      {/* Header: League Info - dynamic background color based on theme */}
+      <div className="px-4 py-2 bg-muted/50 border-b border-border flex items-center gap-2">
+        <Trophy size={14} className="text-accent" />
+        <span className="text-xs font-medium text-foreground/90 uppercase tracking-wide">
           {event.category} | {event.league}
         </span>
       </div>
@@ -175,7 +205,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         
         {/* Team 1 */}
         <div className="flex flex-col items-center gap-2 w-1/3 z-10">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white/5 p-2 flex items-center justify-center border border-white/10">
+          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted/30 p-2 flex items-center justify-center border border-border/50">
             <img 
               src={event.team1Logo} 
               alt={event.team1Name} 
@@ -183,7 +213,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
               onError={(e) => e.currentTarget.src = `https://ui-avatars.com/api/?name=${event.team1Name}&background=random`}
             />
           </div>
-          <span className="text-sm font-bold text-center leading-tight text-white">{event.team1Name}</span>
+          <span className="text-sm font-bold text-center leading-tight text-foreground">{event.team1Name}</span>
         </div>
 
         {/* Center Info */}
@@ -197,14 +227,14 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
                 </span>
                 <span className="text-xs font-bold uppercase tracking-wider">Live</span>
               </div>
-              <div className="text-xl sm:text-2xl font-mono font-medium text-white/90 tracking-widest">
+              <div className="text-xl sm:text-2xl font-mono font-medium text-foreground tracking-widest">
                 {timerString}
               </div>
             </>
           ) : isUpcoming ? (
             <>
-              <div className="text-xl font-bold text-white mb-1">{timeString}</div>
-              <div className="text-xs text-emerald-400 font-medium mb-2">{dateString}</div>
+              <div className="text-xl font-bold text-foreground mb-1">{timeString}</div>
+              <div className="text-xs text-accent font-medium mb-2">{dateString}</div>
               <div className="text-[10px] text-text-secondary uppercase tracking-wide">
                 Starts in {timerString}
               </div>
@@ -212,14 +242,14 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
           ) : (
             <>
               <div className="text-sm text-text-secondary font-medium">Match Ended</div>
-              <div className="text-xs text-white/40 mt-1">{dateString}</div>
+              <div className="text-xs text-muted-foreground mt-1">{dateString}</div>
             </>
           )}
         </div>
 
         {/* Team 2 */}
         <div className="flex flex-col items-center gap-2 w-1/3 z-10">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white/5 p-2 flex items-center justify-center border border-white/10">
+          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted/30 p-2 flex items-center justify-center border border-border/50">
             <img 
               src={event.team2Logo} 
               alt={event.team2Name} 
@@ -227,14 +257,14 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
               onError={(e) => e.currentTarget.src = `https://ui-avatars.com/api/?name=${event.team2Name}&background=random`}
             />
           </div>
-          <span className="text-sm font-bold text-center leading-tight text-white">{event.team2Name}</span>
+          <span className="text-sm font-bold text-center leading-tight text-foreground">{event.team2Name}</span>
         </div>
       </div>
 
       {/* Hover Overlay */}
-      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20 backdrop-blur-[2px]">
+      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20 backdrop-blur-[1px]">
         <div className="flex flex-col items-center gap-2 transform scale-95 group-hover:scale-100 transition-transform duration-300">
-          <div className="bg-emerald-600 text-white rounded-full p-3 shadow-lg shadow-emerald-600/20">
+          <div className="bg-accent text-white rounded-full p-3 shadow-lg shadow-accent/20">
             <PlayCircle size={32} fill="currentColor" className="text-white" />
           </div>
           <span className="text-white font-bold text-xs tracking-widest uppercase">Click to Watch</span>
