@@ -7,7 +7,8 @@ import { LiveEvent } from '@/types';
 import { Loader2, PlayCircle, CheckCircle2, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type FilterType = 'all' | 'live' | 'recent' | 'upcoming';
+// Updated order as requested
+type FilterType = 'all' | 'live' | 'upcoming' | 'recent';
 
 const Live = () => {
   const [events, setEvents] = useState<LiveEvent[]>([]);
@@ -143,7 +144,7 @@ const Live = () => {
 
   return (
     <div className="container mx-auto p-4 md:p-6 max-w-3xl space-y-6">
-      {/* Filter Tabs */}
+      {/* Filter Tabs - Reordered: All, Live, Upcoming, Recent */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         <FilterTab 
           active={filter === 'all'} 
@@ -158,20 +159,19 @@ const Live = () => {
           label="Live" 
           count={counts.live}
           activeClass="bg-red-600 border-red-500 text-white"
-          // Dynamic icon color: White when tab is active (red bg), Red when tab is inactive (white/dark bg)
           icon={<div className={cn("w-2 h-2 rounded-full animate-pulse", filter === 'live' ? "bg-white" : "bg-red-500")} />}
-        />
-        <FilterTab 
-          active={filter === 'recent'} 
-          onClick={() => setFilter('recent')} 
-          label="Recent" 
-          count={counts.recent} 
         />
         <FilterTab 
           active={filter === 'upcoming'} 
           onClick={() => setFilter('upcoming')} 
           label="Upcoming" 
           count={counts.upcoming} 
+        />
+        <FilterTab 
+          active={filter === 'recent'} 
+          onClick={() => setFilter('recent')} 
+          label="Recent" 
+          count={counts.recent} 
         />
       </div>
       
@@ -279,8 +279,9 @@ const MatchCard = ({ event, now }: { event: LiveEvent & { isLive: boolean }, now
             <>
               <div className="text-xl font-bold text-foreground mb-1">{timeString}</div>
               <div className="text-xs text-accent font-medium mb-2">{dateString}</div>
-              <div className="text-[10px] text-text-secondary uppercase tracking-wide">
-                Starts in {timerString}
+              {/* Increased font size from text-[10px] to text-xs/sm and added font-medium/semibold */}
+              <div className="text-xs sm:text-sm text-text-secondary uppercase tracking-wide font-medium">
+                Starts in <span className="font-bold text-foreground">{timerString}</span>
               </div>
             </>
           ) : (
