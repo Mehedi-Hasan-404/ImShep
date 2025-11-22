@@ -1,4 +1,4 @@
-// src/pages/ChannelPlayer.tsx - FIXED: Auto-clean URLs and Proxy
+// src/pages/ChannelPlayer.tsx - FIXED: Proper URL handling for manual channels
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -14,7 +14,6 @@ import { useFavorites } from '@/contexts/FavoritesContext';
 import { useRecents } from '@/contexts/RecentsContext';
 import { toast } from "@/components/ui/sonner";
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { getProxiedUrl } from '@/lib/urlEncryption';
 
 interface ChannelPlayerProps {
   channelId: string;
@@ -353,16 +352,49 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
 
   const isChannelFavorite = isFavorite(channel.id);
   
-  // ✅ FIXED: Strip extra M3U parameters (like |Referer=) and ensure proxying
-  const cleanStreamUrl = channel.streamUrl.split('|')[0].trim();
-  const playerStreamUrl = getProxiedUrl(cleanStreamUrl);
+  // ✅ FIXED: Proper URL processing for ALL manual channels
+  let playerStreamUrl = channel.streamUrl;
   
-  console.log('🎬 Player URL Debug:', {
+  // Remove M3U parameters (like |Referer=)
+  const cleanStreamUrl = channel.streamUrl.split('|')[0].trim();
+  
+  // Detect stream type
+  const urlLower = cleanStreamUrl.toLowerCase();
+  const isM3U8 = urlLower.includes('.m3u8') || urlLower.includes('.m3u');
+  const isMPD = urlLower.includes('.mpd');
+  const isMP4 = urlLower.includes('.mp4');
+  
+  console.log('🎬 Stream Type Detection:', {
     channelName: channel.name,
-    originalUrl: channel.streamUrl.substring(0, 50) + '...',
-    cleanUrl: cleanStreamUrl.substring(0, 50) + '...',
-    proxiedUrl: playerStreamUrl.substring(0, 50) + '...',
-    isProxied: playerStreamUrl.includes('/api/m3u8-proxy')
+    isM3U8,
+    isMPD,
+    isMP4,
+    originalUrl: channel.streamUrl.substring(0, 60) + '...',
+    cleanUrl: cleanStreamUrl.substring(0, 60) + '...'
+  });
+  
+  // ✅ CRITICAL FIX: Proxy M3U8 streams, pass MPD/MP4 directly
+  if (isM3U8) {
+    // M3U8 needs proxying for CORS
+    playerStreamUrl = `/api/m3u8-proxy?url=${encodeURIComponent(cleanStreamUrl)}`;
+    console.log('✅ Proxying M3U8 stream');
+  } else if (isMPD) {
+    // MPD (DASH) - pass directly to Shaka Player
+    playerStreamUrl = cleanStreamUrl;
+    console.log('✅ Using MPD stream directly (Shaka will handle)');
+  } else if (isMP4) {
+    // MP4 - pass directly to native player
+    playerStreamUrl = cleanStreamUrl;
+    console.log('✅ Using MP4 stream directly (native player)');
+  } else {
+    // Unknown format - try proxying
+    playerStreamUrl = `/api/m3u8-proxy?url=${encodeURIComponent(cleanStreamUrl)}`;
+    console.warn('⚠️ Unknown stream format, attempting proxy');
+  }
+  
+  console.log('🎬 Final Player URL:', {
+    original: channel.streamUrl.substring(0, 50) + '...',
+    processed: playerStreamUrl.substring(0, 80) + '...'
   });
 
   return (
@@ -413,6 +445,9 @@ const ChannelPlayer = ({ channelId }: ChannelPlayerProps) => {
             <div className="flex items-center gap-2 mt-1">
               <Badge variant="secondary">{channel.categoryName}</Badge>
               <Badge variant="destructive" className="animate-pulse">LIVE</Badge>
+              {isMPD && <Badge variant="outline" className="text-blue-500 border-blue-500">DASH</Badge>}
+              {isM3U8 && <Badge variant="outline" className="text-green-500 border-green-500">HLS</Badge>}
+              {isMP4 && <Badge variant="outline" className="text-purple-500 border-purple-500">MP4</Badge>}
             </div>
           </div>
         </div>
