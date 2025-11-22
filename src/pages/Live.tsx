@@ -15,6 +15,7 @@ const Live = () => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [now, setNow] = useState(Date.now());
 
+  // Update "now" every second to keep timers and status accurate
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -35,50 +36,104 @@ const Live = () => {
     fetchEvents();
   }, []);
 
-  // --- UPDATED SORTING LOGIC ---
+  // --- PROCESSING LOGIC ---
   const getProcessedEvents = () => {
-    let filtered = events.filter(event => {
-      const eventTime = new Date(event.startTime).getTime();
-      const isRecentTime = eventTime < now && eventTime > (now - 24 * 60 * 60 * 1000);
+    // 1. Pre-calculate status for all events
+    const eventsWithStatus = events.map(event => {
+      const start = new Date(event.startTime).getTime();
+      const end = event.endTime ? new Date(event.endTime).getTime() : null;
+      
+      // Event is Live if:
+      // - Manually forced via Admin (isLive === true)
+      // - OR: Current Time is between Start and End (if End exists)
+      const isCalculatedLive = event.isLive || (end !== null && now >= start && now < end);
+
+      return {
+        ...event,
+        isLive: isCalculatedLive, // Override with calculated status
+        _rawStart: start,
+        _rawEnd: end
+      };
+    });
+
+    // 2. Filter based on calculated status
+    let filtered = eventsWithStatus.filter(event => {
+      const start = event._rawStart;
+      const end = event._rawEnd;
+      const isLive = event.isLive;
+      
+      // "Recent" Definition:
+      // - Not currently Live
+      // - AND (Ended in the last 24 hours)
+      // - Effective End time is either the explicit endTime OR the startTime (if no end time set)
+      const effectiveEndTime = end || start;
+      const hasEnded = !isLive && now > effectiveEndTime;
+      const isRecentTime = hasEnded && effectiveEndTime > (now - 24 * 60 * 60 * 1000);
       
       switch (filter) {
-        case 'live': return event.isLive;
-        case 'upcoming': return eventTime > now && !event.isLive;
-        case 'recent': return isRecentTime && !event.isLive;
-        case 'all': default: return true;
+        case 'live':
+          return isLive;
+        case 'upcoming':
+          return start > now && !isLive;
+        case 'recent':
+          return isRecentTime;
+        case 'all':
+        default:
+          return true;
       }
     });
 
+    // 3. Sort
     return filtered.sort((a, b) => {
-      // 1. Live events always first
+      // Priority 1: Live events always at top
       if (a.isLive && !b.isLive) return -1;
       if (!a.isLive && b.isLive) return 1;
       
-      const timeA = new Date(a.startTime).getTime();
-      const timeB = new Date(b.startTime).getTime();
+      const timeA = a._rawStart;
+      const timeB = b._rawStart;
       const isUpcomingA = timeA > now;
       const isUpcomingB = timeB > now;
 
-      // 2. Upcoming events come before Recent events
+      // If both Live: Sort by start time (oldest live first?) or relevance
+      if (a.isLive && b.isLive) return timeA - timeB;
+
+      // Priority 2: Upcoming comes before Recent
       if (isUpcomingA && !isUpcomingB) return -1;
       if (!isUpcomingA && isUpcomingB) return 1;
 
-      // 3. Upcoming: Sort Ascending (Soonest first)
+      // Priority 3: If both Upcoming -> Ascending (Soonest first)
       if (isUpcomingA && isUpcomingB) return timeA - timeB;
 
-      // 4. Recent: Sort Descending (Newest ended first)
-      return timeB - timeA;
+      // Priority 4: If both Recent -> Descending (Newest ended first)
+      // Use End Time for sorting if available, otherwise Start Time
+      const endA = a._rawEnd || timeA;
+      const endB = b._rawEnd || timeB;
+      return endB - endA;
     });
   };
 
   const processedEvents = getProcessedEvents();
 
-  const counts = {
-    all: events.length,
-    live: events.filter(e => e.isLive).length,
-    recent: events.filter(e => new Date(e.startTime).getTime() < now && !e.isLive && new Date(e.startTime).getTime() > (now - 86400000)).length,
-    upcoming: events.filter(e => new Date(e.startTime).getTime() > now && !e.isLive).length
+  // Calculate counts for tabs
+  const getCounts = () => {
+    let c = { all: events.length, live: 0, recent: 0, upcoming: 0 };
+    events.forEach(e => {
+        const start = new Date(e.startTime).getTime();
+        const end = e.endTime ? new Date(e.endTime).getTime() : null;
+        const isLive = e.isLive || (end !== null && now >= start && now < end);
+        
+        if (isLive) {
+            c.live++;
+        } else if (start > now) {
+            c.upcoming++;
+        } else {
+            const effectiveEnd = end || start;
+            if (effectiveEnd > (now - 86400000)) c.recent++;
+        }
+    });
+    return c;
   };
+  const counts = getCounts();
 
   if (loading) return (
     <div className="flex justify-center items-center min-h-[60vh]">
@@ -88,6 +143,7 @@ const Live = () => {
 
   return (
     <div className="container mx-auto p-4 md:p-6 max-w-3xl space-y-6">
+      {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         <FilterTab 
           active={filter === 'all'} 
@@ -102,7 +158,7 @@ const Live = () => {
           label="Live" 
           count={counts.live}
           activeClass="bg-red-600 border-red-500 text-white"
-          // FIX 1: Conditional color for the live dot (Red when inactive/white-bg, White when active/red-bg)
+          // Dynamic icon color: White when tab is active (red bg), Red when tab is inactive (white/dark bg)
           icon={<div className={cn("w-2 h-2 rounded-full animate-pulse", filter === 'live' ? "bg-white" : "bg-red-500")} />}
         />
         <FilterTab 
@@ -119,11 +175,10 @@ const Live = () => {
         />
       </div>
       
-      {/* FIX 3: Use flex-col gap-4 instead of space-y-4 for more consistent spacing with links */}
+      {/* Events Grid */}
       <div className="flex flex-col gap-4">
         {processedEvents.length > 0 ? (
           processedEvents.map(event => (
-            // FIX 3: Added className="block" to ensure Link behaves like a block element for spacing
             <Link key={event.id} to={`/live/${event.id}`} className="block">
                  <MatchCard event={event} now={now} />
             </Link>
@@ -162,14 +217,16 @@ const FilterTab = ({
   </button>
 );
 
-const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
+const MatchCard = ({ event, now }: { event: LiveEvent & { isLive: boolean }, now: number }) => {
   const eventTime = new Date(event.startTime).getTime();
   const isUpcoming = eventTime > now && !event.isLive;
   
+  // Format Time/Date
   const dateObj = new Date(event.startTime);
   const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const dateString = dateObj.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
   
+  // Timer Logic
   const diff = Math.abs(now - eventTime);
   const hours = Math.floor(diff / (1000 * 60 * 60));
   const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -177,8 +234,9 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
   const timerString = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
   return (
-    // FIX 2: Changed bg-[#0a0a0a] to bg-card for theme support
+    // Uses bg-card for theme support instead of hardcoded black
     <div className="bg-card rounded-xl border border-border hover:border-accent/50 transition-all duration-300 overflow-hidden relative group shadow-sm">
+      {/* Header: League Info */}
       <div className="px-4 py-2 bg-muted/50 border-b border-border flex items-center gap-2">
         <Trophy size={14} className="text-accent" />
         <span className="text-xs font-medium text-foreground/90 uppercase tracking-wide">
@@ -186,7 +244,10 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         </span>
       </div>
 
+      {/* Main Body: Teams */}
       <div className="p-4 flex items-center justify-between relative">
+        
+        {/* Team 1 */}
         <div className="flex flex-col items-center gap-2 w-1/3 z-10">
           <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted/30 p-2 flex items-center justify-center border border-border/50">
             <img 
@@ -199,6 +260,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
           <span className="text-sm font-bold text-center leading-tight text-foreground">{event.team1Name}</span>
         </div>
 
+        {/* Center Info */}
         <div className="flex flex-col items-center justify-center w-1/3 z-10">
           {event.isLive ? (
             <>
@@ -229,6 +291,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
           )}
         </div>
 
+        {/* Team 2 */}
         <div className="flex flex-col items-center gap-2 w-1/3 z-10">
           <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted/30 p-2 flex items-center justify-center border border-border/50">
             <img 
@@ -242,6 +305,7 @@ const MatchCard = ({ event, now }: { event: LiveEvent, now: number }) => {
         </div>
       </div>
 
+      {/* Hover Overlay */}
       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20 backdrop-blur-[1px]">
         <div className="flex flex-col items-center gap-2 transform scale-95 group-hover:scale-100 transition-transform duration-300">
           <div className="bg-accent text-white rounded-full p-3 shadow-lg shadow-accent/20">
