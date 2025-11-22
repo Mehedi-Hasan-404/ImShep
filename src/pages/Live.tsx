@@ -7,7 +7,6 @@ import { LiveEvent } from '@/types';
 import { Loader2, PlayCircle, CheckCircle2, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Updated order as requested
 type FilterType = 'all' | 'live' | 'upcoming' | 'recent';
 
 const Live = () => {
@@ -144,7 +143,7 @@ const Live = () => {
 
   return (
     <div className="container mx-auto p-4 md:p-6 max-w-3xl space-y-6">
-      {/* Filter Tabs - Reordered: All, Live, Upcoming, Recent */}
+      {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         <FilterTab 
           active={filter === 'all'} 
@@ -234,7 +233,6 @@ const MatchCard = ({ event, now }: { event: LiveEvent & { isLive: boolean }, now
   const timerString = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
   return (
-    // Uses bg-card for theme support instead of hardcoded black
     <div className="bg-card rounded-xl border border-border hover:border-accent/50 transition-all duration-300 overflow-hidden relative group shadow-sm">
       {/* Header: League Info */}
       <div className="px-4 py-2 bg-muted/50 border-b border-border flex items-center gap-2">
@@ -279,9 +277,15 @@ const MatchCard = ({ event, now }: { event: LiveEvent & { isLive: boolean }, now
             <>
               <div className="text-xl font-bold text-foreground mb-1">{timeString}</div>
               <div className="text-xs text-accent font-medium mb-2">{dateString}</div>
-              {/* Increased font size from text-[10px] to text-xs/sm and added font-medium/semibold */}
-              <div className="text-xs sm:text-sm text-text-secondary uppercase tracking-wide font-medium">
-                Starts in <span className="font-bold text-foreground">{timerString}</span>
+              
+              {/* Stacked layout for perfect alignment */}
+              <div className="flex flex-col items-center justify-center">
+                <span className="text-xs text-text-secondary uppercase tracking-wide font-medium mb-0.5">
+                  Starts In
+                </span>
+                <span className="text-base font-bold text-foreground font-mono">
+                  {timerString}
+                </span>
               </div>
             </>
           ) : (
