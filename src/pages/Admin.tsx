@@ -1,4 +1,4 @@
-// /src/pages/Admin.tsx
+// src/pages/Admin.tsx
 import { useState, useEffect } from 'react';
 import { Route, Link, useLocation, Switch } from 'wouter';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -634,6 +634,7 @@ const LiveEventsManager = () => {
   
   const [currentLink, setCurrentLink] = useState({ label: '', url: '' });
   const [loading, setLoading] = useState(false);
+  const [editingLinkIndex, setEditingLinkIndex] = useState<number | null>(null);
 
   useEffect(() => {
     fetchEvents();
@@ -651,13 +652,36 @@ const LiveEventsManager = () => {
 
   const handleAddLink = () => {
     if (currentLink.label && currentLink.url) {
-      setNewEvent(prev => ({ ...prev, links: [...prev.links, currentLink] }));
+      if (editingLinkIndex !== null) {
+        // Update existing link
+        setNewEvent(prev => {
+          const updatedLinks = [...prev.links];
+          updatedLinks[editingLinkIndex] = currentLink;
+          return { ...prev, links: updatedLinks };
+        });
+        setEditingLinkIndex(null); // Exit edit mode
+        toast.success("Link updated");
+      } else {
+        // Add new link
+        setNewEvent(prev => ({ ...prev, links: [...prev.links, currentLink] }));
+      }
+      // Clear inputs
       setCurrentLink({ label: '', url: '' });
     }
   };
 
+  const handleEditLink = (index: number) => {
+    const linkToEdit = newEvent.links[index];
+    setCurrentLink(linkToEdit);
+    setEditingLinkIndex(index);
+  };
+
   const handleRemoveLink = (index: number) => {
     setNewEvent(prev => ({ ...prev, links: prev.links.filter((_, i) => i !== index) }));
+    if (editingLinkIndex === index) {
+      setEditingLinkIndex(null);
+      setCurrentLink({ label: '', url: '' });
+    }
   };
 
   const handleSaveEvent = async () => {
@@ -704,6 +728,8 @@ const LiveEventsManager = () => {
       team2Name: '', team2Logo: '', 
       startTime: '', isLive: false, links: [] 
     });
+    setCurrentLink({ label: '', url: '' });
+    setEditingLinkIndex(null);
   };
 
   const handleEditEvent = (event: LiveEvent) => {
@@ -719,6 +745,8 @@ const LiveEventsManager = () => {
       isLive: event.isLive,
       links: event.links || [],
     });
+    setCurrentLink({ label: '', url: '' });
+    setEditingLinkIndex(null);
   };
 
   const handleDeleteEvent = async (id: string) => {
@@ -794,15 +822,39 @@ const LiveEventsManager = () => {
           <div className="md:col-span-2 border-t border-border pt-4 mt-2">
             <h4 className="font-semibold mb-3 text-sm text-text-secondary">Stream Links</h4>
             <div className="flex gap-2 mb-3">
-              <input className="form-input flex-1" placeholder="Label (e.g. 720p)" value={currentLink.label} onChange={e => setCurrentLink({...currentLink, label: e.target.value})} />
-              <input className="form-input flex-[2]" placeholder="Stream URL / Link" value={currentLink.url} onChange={e => setCurrentLink({...currentLink, url: e.target.value})} />
-              <button onClick={handleAddLink} className="btn-secondary"><Plus size={16} /></button>
+              <input 
+                className="form-input flex-1" 
+                placeholder="Label (e.g. 720p)" 
+                value={currentLink.label} 
+                onChange={e => setCurrentLink({...currentLink, label: e.target.value})} 
+              />
+              <input 
+                className="form-input flex-[2]" 
+                placeholder="Stream URL / Link" 
+                value={currentLink.url} 
+                onChange={e => setCurrentLink({...currentLink, url: e.target.value})} 
+              />
+              <button 
+                onClick={handleAddLink} 
+                className={`btn-secondary ${editingLinkIndex !== null ? 'bg-accent text-white border-accent' : ''}`}
+              >
+                {editingLinkIndex !== null ? <CheckCircle size={16} /> : <Plus size={16} />}
+              </button>
             </div>
             <div className="flex flex-wrap gap-2">
               {newEvent.links.map((link, i) => (
-                <div key={i} className="flex items-center gap-2 bg-bg-tertiary px-3 py-1.5 rounded-full border border-border text-sm">
+                <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-all ${
+                  editingLinkIndex === i 
+                    ? 'bg-accent/20 border-accent ring-1 ring-accent' 
+                    : 'bg-bg-tertiary border-border'
+                }`}>
                   <span className="font-bold text-accent">{link.label}</span>
-                  <button onClick={() => handleRemoveLink(i)} className="text-destructive hover:text-red-400 ml-1"><X size={14} /></button>
+                  <button onClick={() => handleEditLink(i)} className="text-text-secondary hover:text-blue-400 ml-2" title="Edit Link">
+                    <Edit size={14} />
+                  </button>
+                  <button onClick={() => handleRemoveLink(i)} className="text-text-secondary hover:text-red-400 ml-1" title="Remove Link">
+                    <X size={14} />
+                  </button>
                 </div>
               ))}
             </div>
