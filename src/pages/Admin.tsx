@@ -619,7 +619,7 @@ const LiveEventsManager = () => {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [editingEvent, setEditingEvent] = useState<LiveEvent | null>(null);
   
-  // Updated State for new fields
+  // Updated State with End Time
   const [newEvent, setNewEvent] = useState({
     category: '', // Sport Name (e.g. Cricket)
     league: '',   // League Name (e.g. PSL)
@@ -628,6 +628,7 @@ const LiveEventsManager = () => {
     team2Name: '',
     team2Logo: '',
     startTime: '',
+    endTime: '', // Added End Time
     isLive: false,
     links: [] as LiveEventLink[],
   });
@@ -692,12 +693,13 @@ const LiveEventsManager = () => {
     }
     setLoading(true);
     try {
-      // Construct event data, ensuring we also save title/description for backward compatibility if needed
+      // Construct event data
       const eventData = { 
         ...newEvent,
-        title: `${newEvent.team1Name} vs ${newEvent.team2Name}`, // Fallback/Searchable Title
+        endTime: newEvent.endTime || null, // Handle optional end time
+        title: `${newEvent.team1Name} vs ${newEvent.team2Name}`,
         description: `${newEvent.league} match between ${newEvent.team1Name} and ${newEvent.team2Name}`,
-        bannerUrl: '', // Not used in new specific design
+        bannerUrl: '',
         category: newEvent.category || 'Sports',
         league: newEvent.league || 'Match',
       };
@@ -726,7 +728,8 @@ const LiveEventsManager = () => {
       category: '', league: '', 
       team1Name: '', team1Logo: '', 
       team2Name: '', team2Logo: '', 
-      startTime: '', isLive: false, links: [] 
+      startTime: '', endTime: '', // Reset end time
+      isLive: false, links: [] 
     });
     setCurrentLink({ label: '', url: '' });
     setEditingLinkIndex(null);
@@ -742,6 +745,7 @@ const LiveEventsManager = () => {
       team2Name: event.team2Name || '',
       team2Logo: event.team2Logo || '',
       startTime: event.startTime,
+      endTime: event.endTime || '', // Load end time
       isLive: event.isLive,
       links: event.links || [],
     });
@@ -797,13 +801,20 @@ const LiveEventsManager = () => {
           <div className="md:col-span-2 my-2 border-b border-border" />
 
           {/* Timing & Status */}
-          <div>
-            <label className="block text-sm font-medium mb-1 text-text-secondary">Start Time *</label>
-            <input type="datetime-local" className="form-input" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
-            <p className="text-xs text-text-secondary mt-1">Required for sorting and countdowns</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-text-secondary">Start Time *</label>
+              <input type="datetime-local" className="form-input" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
+              <p className="text-xs text-text-secondary mt-1">Required for sorting and countdowns</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1 text-text-secondary">End Time (Optional)</label>
+              <input type="datetime-local" className="form-input" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
+              <p className="text-xs text-text-secondary mt-1">Used to auto-expire Live status</p>
+            </div>
           </div>
 
-          <div className="flex items-end pb-1">
+          <div className="md:col-span-2 mt-2">
             <div className="flex items-center gap-3 p-3 bg-bg-secondary rounded-lg border border-border w-full">
               <input 
                 type="checkbox" 
