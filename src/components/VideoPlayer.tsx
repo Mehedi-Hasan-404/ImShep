@@ -82,7 +82,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     showControls: true,
     currentTime: 0,
     duration: 0,
-    startTime: 0, // Critical for fixing absolute/infinity timestamps
+    startTime: 0, // Added to handle absolute timestamp offsets
     buffered: 0,
     showSettings: false,
     currentQuality: -1, 
@@ -97,8 +97,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-  // --- CRITICAL FIX: Normalize Time & Handle Infinity ---
-  // This function looks for the real start/end times to fix "Infinity" displays
+  // Helper to calculate accurate time stats (Start, Current, Duration, Live Status)
   const getTimeStats = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return { currentTime: 0, duration: 0, startTime: 0, isLive: false };
 
@@ -106,50 +105,39 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     let duration = video.duration;
     let startTime = 0;
     
-    // If browser says Infinity, it thinks it's live. We check if it's actually seekable VOD.
-    let isLive = !Number.isFinite(duration);
+    // Initial Live check based on Infinity duration
+    let isLive = !isFinite(duration);
 
-    // Strategy 1: Shaka Player Seek Range (Best for DASH)
+    // Strategy 1: Shaka Player Seek Range
     if (playerTypeRef.current === 'shaka' && shakaPlayerRef.current) {
       try {
         const range = shakaPlayerRef.current.seekRange();
         if (range) {
           startTime = range.start;
-          // If end is finite and > 0, use it as duration. 
-          // This fixes DASH streams showing Infinity but having a definite end.
-          if (Number.isFinite(range.end) && range.end > 0) {
+          // If we have a finite end > 0, use it as duration (absolute end time)
+          if (isFinite(range.end) && range.end > 0) {
             duration = range.end;
-            // If the stream has a fixed start (near 0) and fixed end, treat as VOD
-            if (range.start < 10) {
-                isLive = false;
-            } else {
-                // It's a sliding window live stream or DVR
-                // We can still show time if we treat it as relative
-                isLive = shakaPlayerRef.current.isLive();
-            }
+            // If we have a fixed range, it's likely VOD (or seekable live treated as VOD for UI)
+            isLive = false; 
           }
         }
       } catch (e) { /* ignore */ }
     } 
-    // Strategy 2: Native Seekable Range (Fallback for HLS/Native)
+    // Strategy 2: Native Seekable Range
     else if (video.seekable && video.seekable.length > 0) {
       try {
         startTime = video.seekable.start(0);
         const end = video.seekable.end(video.seekable.length - 1);
-        if (Number.isFinite(end) && end > 0) {
+        if (isFinite(end) && end > 0) {
           duration = end;
-          if (!Number.isFinite(video.duration)) {
-             // We found a real duration even though video.duration was Infinity
-             isLive = false; 
-          }
+          isLive = false;
         }
       } catch (e) { /* ignore */ }
     }
 
-    // Safety checks to prevent NaNs
-    if (!Number.isFinite(startTime)) startTime = 0;
-    if (!Number.isFinite(duration)) duration = 0;
-    if (!Number.isFinite(currentTime)) currentTime = 0;
+    // Sanity check: prevent negative start times or NaNs
+    if (!isFinite(startTime) || startTime < 0) startTime = 0;
+    if (!isFinite(duration) || isNaN(duration)) duration = 0;
 
     return { currentTime, duration, startTime, isLive };
   }, []);
@@ -267,7 +255,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           video.muted = muted;
           if (autoPlay) { video.play().catch(() => { setPlayerState(prev => ({ ...prev, isPlaying: false })); }); }
 
-          // Use new time stat logic
           const { currentTime, duration, startTime, isLive } = getTimeStats(video);
           
           setPlayerState(prev => ({ ...prev, isLoading: false, error: null, availableQualities: levels, availableAudioTracks: audioTracks, currentQuality: hls.currentLevel, currentAudioTrack: hls.audioTrack || 0, isMuted: video.muted, isPlaying: !video.paused, showControls: true, isLive, currentTime, duration, startTime }));
@@ -289,7 +276,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       
       player.configure({ 
         streaming: { bufferingGoal: 15, rebufferingGoal: 8, bufferBehind: 30, retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 }, useNativeHlsOnSafari: true, jumpLargeGaps: true, inbandTextTracks: true },
-        // Sequence mode: false is critical for VOD durations to appear correctly
         manifest: { retryParameters: { timeout: 8000, maxAttempts: 3, baseDelay: 1000, backoffFactor: 2 }, dash: { clockSyncUri: '', ignoreDrmInfo: false, sequenceMode: false, timeShiftBufferDepth: 60 } },
         abr: { enabled: true, defaultBandwidthEstimate: 1500000, bandwidthUpgradeSeconds: 5, bandwidthDowngradeSeconds: 10 },
         drm: { retryParameters: { timeout: 5000, maxAttempts: 2 }, servers: {}, advanced: {} },
@@ -363,19 +349,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => { video.removeEventListener('loadedmetadata', onLoadedMetadata); video.removeEventListener('error', onErrorHandler); };
   };
 
-  // --- FIXED Time Formatter ---
-  // Prevents "Infinity:NaN:NaN" by validating input
+  // --- Updated Time Formatting to Handle Relative Time ---
   const formatTime = (time: number): string => {
-    // Explicit check: if time is Infinity or NaN or negative, return 0:00
-    if (!Number.isFinite(time) || time < 0) return "0:00";
-    
+    if (!isFinite(time) || time < 0) return "0:00";
     const hours = Math.floor(time / 3600);
     const minutes = Math.floor((time % 3600) / 60);
     const seconds = Math.floor(time % 60);
-    
-    // Prevent any remaining NaNs from math
-    if (isNaN(minutes) || isNaN(seconds)) return "0:00";
-
     if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
@@ -430,7 +409,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handleWaiting = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: true })); };
     const handlePlaying = () => { if (!isMountedRef.current) return; setPlayerState(prev => ({ ...prev, isLoading: false, isPlaying: true })); lastActivityRef.current = Date.now(); };
     
-    // CONTINUOUSLY UPDATE TIME AND DURATION
     const updateStateWithTime = () => {
         if (!isMountedRef.current || !video) return;
         const buffered = video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : 0;
@@ -470,53 +448,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleSheetTouchMove = (e: React.TouchEvent) => { if (touchStartYRef.current === null) return; const currentY = e.touches[0].clientY; const deltaY = currentY - touchStartYRef.current; if (deltaY > 0) { setSheetDragY(deltaY); } };
   const handleSheetTouchEnd = () => { if (sheetDragY > 100) { setPlayerState(prev => ({ ...prev, showSettings: false })); setExpandedSettingItem(null); } setSheetDragY(0); touchStartYRef.current = null; };
 
-  // --- RELATIVE TIME CALCULATIONS FOR SEEKING ---
-  // Calculate current time relative to the start time
-  const getRelativeTime = () => {
-      return Math.max(0, playerState.currentTime - playerState.startTime);
-  };
-  
-  const getRelativeDuration = () => {
-      return Math.max(0, playerState.duration - playerState.startTime);
-  };
+  // --- Updated Seek Calculations to Respect Start Time ---
 
-  const relativeCurrent = getRelativeTime();
-  const relativeDur = getRelativeDuration();
-  
-  const currentTimePercentage = (Number.isFinite(relativeDur) && relativeDur > 0 && !playerState.isLive) 
-    ? (relativeCurrent / relativeDur) * 100 
-    : (playerState.isLive ? 100 : 0);
-
-  // UI Sizing Logic
-  const getControlSizes = () => {
-    const isTablet = isMobile && window.innerWidth > 768;
-    const isFullscreenLandscape = playerState.isFullscreen && isLandscape;
-    const isMobileLandscape = isMobile && !isTablet && isLandscape;
-    const isMobilePortrait = isMobile && !isTablet && !isLandscape;
-    
-    if (isFullscreenLandscape) { return { iconSmall: 28, iconMedium: 32, iconLarge: 36, centerButtonClass: 'w-24 h-24', centerIcon: 40, paddingClass: 'p-4', gapClass: 'gap-4', textClass: 'text-lg', progressBarClass: 'h-2', progressThumbClass: 'w-5 h-5', progressInsetClass: 'left-2.5 right-2.5', containerPaddingClass: 'p-6' }; }
-    if (isMobileLandscape) { return { iconSmall: 22, iconMedium: 26, iconLarge: 28, centerButtonClass: 'w-20 h-20', centerIcon: 32, paddingClass: 'p-3', gapClass: 'gap-2', textClass: 'text-base', progressBarClass: 'h-1.5', progressThumbClass: 'w-4 h-4', progressInsetClass: 'left-2 right-2', containerPaddingClass: 'p-4' }; }
-    if (isMobilePortrait) { return { iconSmall: 18, iconMedium: 22, iconLarge: 24, centerButtonClass: 'w-16 h-16', centerIcon: 28, paddingClass: 'p-2', gapClass: 'gap-2', textClass: 'text-sm', progressBarClass: 'h-1', progressThumbClass: 'w-3 h-3', progressInsetClass: 'left-1.5 right-1.5', containerPaddingClass: 'p-3' }; }
-    if (isTablet) { return { iconSmall: 22, iconMedium: 26, iconLarge: 28, centerButtonClass: 'w-20 h-20', centerIcon: 32, paddingClass: 'p-3', gapClass: 'gap-3', textClass: 'text-base', progressBarClass: 'h-1.5', progressThumbClass: 'w-4 h-4', progressInsetClass: 'left-2 right-2', containerPaddingClass: 'p-4' }; }
-    return { iconSmall: 20, iconMedium: 24, iconLarge: 26, centerButtonClass: 'w-16 h-16', centerIcon: 28, paddingClass: 'p-2', gapClass: 'gap-3', textClass: 'text-sm', progressBarClass: 'h-1', progressThumbClass: 'w-3 h-3', progressInsetClass: 'left-1.5 right-1.5', containerPaddingClass: 'p-4' };
-  };
-
-  const sizes = getControlSizes();
-
-  // --- Updated Seek Handlers to use Relative Math ---
   const calculateNewTime = useCallback((clientX: number): number | null => {
     const video = videoRef.current; const progressBar = progressRef.current; 
-    if (!video || !progressBar || !Number.isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return null; 
+    if (!video || !progressBar || !isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return null; 
     const rect = progressBar.getBoundingClientRect(); 
     const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width)); 
     const percentage = clickX / rect.width; 
+    // Calculate new time relative to the duration window (End - Start) + Start
     const relativeDuration = playerState.duration - playerState.startTime;
     return (percentage * relativeDuration) + playerState.startTime;
   }, [playerState.isLive, playerState.duration, playerState.startTime]);
 
   const throttledUpdate = useCallback((updateFn: () => void) => { if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = requestAnimationFrame(updateFn); }, []);
 
-  const handleDragStart = useCallback((e: React.MouseEvent) => { e.stopPropagation(); const video = videoRef.current; if (!video || !Number.isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now(); }, [playerState.isLive, playerState.duration]);
+  const handleDragStart = useCallback((e: React.MouseEvent) => { e.stopPropagation(); const video = videoRef.current; if (!video || !isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return; wasPlayingBeforeSeekRef.current = !video.paused; dragStartRef.current = { isDragging: true }; setPlayerState(prev => ({ ...prev, isSeeking: true, showControls: true })); video.pause(); lastActivityRef.current = Date.now(); }, [playerState.isLive, playerState.duration]);
 
   const handleDragMove = useCallback((e: MouseEvent) => { if (!dragStartRef.current?.isDragging) return; e.preventDefault(); throttledUpdate(() => { const newTime = calculateNewTime(e.clientX); if (newTime !== null) { setPlayerState(prev => ({ ...prev, currentTime: newTime, showControls: true })); seekTimeRef.current = newTime; } lastActivityRef.current = Date.now(); }); }, [calculateNewTime, throttledUpdate]);
 
@@ -527,11 +474,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.stopPropagation();
     const video = videoRef.current;
-    if (!video || !Number.isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return;
+    if (!video || !isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return;
     wasPlayingBeforeSeekRef.current = !video.paused;
     const rect = progressRef.current?.getBoundingClientRect();
     if (!rect) return;
     const touch = e.touches[0];
+    // Calculate initial seek time respecting offset
     const relativeDuration = playerState.duration - playerState.startTime;
     const clickX = touch.clientX - rect.left;
     const percentage = clickX / rect.width;
@@ -602,6 +550,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => { const handleGlobalMouseMove = (e: MouseEvent) => { if (dragStartRef.current?.isDragging) handleDragMove(e); }; const handleGlobalMouseUp = () => { if (dragStartRef.current?.isDragging) handleDragEnd(); }; document.addEventListener('mousemove', handleGlobalMouseMove); document.addEventListener('mouseup', handleGlobalMouseUp); return () => { document.removeEventListener('mousemove', handleGlobalMouseMove); document.removeEventListener('mouseup', handleGlobalMouseUp); }; }, [handleDragMove, handleDragEnd]);
   useEffect(() => { const handleGlobalTouchEnd = () => { if (touchStartRef.current) handleTouchEnd(); }; document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false }); return () => document.removeEventListener('touchend', handleGlobalTouchEnd); }, [handleTouchEnd]);
 
+  // --- Relative Time Calculation for UI ---
+  const getRelativeTime = () => {
+      return Math.max(0, playerState.currentTime - playerState.startTime);
+  };
+  
+  const getRelativeDuration = () => {
+      return Math.max(0, playerState.duration - playerState.startTime);
+  };
+
+  // Calculate percentage based on relative values
+  const relativeCurrent = getRelativeTime();
+  const relativeDur = getRelativeDuration();
+  
+  const currentTimePercentage = (isFinite(relativeDur) && relativeDur > 0 && !playerState.isLive) 
+    ? (relativeCurrent / relativeDur) * 100 
+    : (playerState.isLive ? 100 : 0);
+
+  const getControlSizes = () => {
+    const isTablet = isMobile && window.innerWidth > 768;
+    const isFullscreenLandscape = playerState.isFullscreen && isLandscape;
+    const isMobileLandscape = isMobile && !isTablet && isLandscape;
+    const isMobilePortrait = isMobile && !isTablet && !isLandscape;
+    
+    if (isFullscreenLandscape) { return { iconSmall: 28, iconMedium: 32, iconLarge: 36, centerButtonClass: 'w-24 h-24', centerIcon: 40, paddingClass: 'p-4', gapClass: 'gap-4', textClass: 'text-lg', progressBarClass: 'h-2', progressThumbClass: 'w-5 h-5', progressInsetClass: 'left-2.5 right-2.5', containerPaddingClass: 'p-6' }; }
+    if (isMobileLandscape) { return { iconSmall: 22, iconMedium: 26, iconLarge: 28, centerButtonClass: 'w-20 h-20', centerIcon: 32, paddingClass: 'p-3', gapClass: 'gap-2', textClass: 'text-base', progressBarClass: 'h-1.5', progressThumbClass: 'w-4 h-4', progressInsetClass: 'left-2 right-2', containerPaddingClass: 'p-4' }; }
+    if (isMobilePortrait) { return { iconSmall: 18, iconMedium: 22, iconLarge: 24, centerButtonClass: 'w-16 h-16', centerIcon: 28, paddingClass: 'p-2', gapClass: 'gap-2', textClass: 'text-sm', progressBarClass: 'h-1', progressThumbClass: 'w-3 h-3', progressInsetClass: 'left-1.5 right-1.5', containerPaddingClass: 'p-3' }; }
+    if (isTablet) { return { iconSmall: 22, iconMedium: 26, iconLarge: 28, centerButtonClass: 'w-20 h-20', centerIcon: 32, paddingClass: 'p-3', gapClass: 'gap-3', textClass: 'text-base', progressBarClass: 'h-1.5', progressThumbClass: 'w-4 h-4', progressInsetClass: 'left-2 right-2', containerPaddingClass: 'p-4' }; }
+    return { iconSmall: 20, iconMedium: 24, iconLarge: 26, centerButtonClass: 'w-16 h-16', centerIcon: 28, paddingClass: 'p-2', gapClass: 'gap-3', textClass: 'text-sm', progressBarClass: 'h-1', progressThumbClass: 'w-3 h-3', progressInsetClass: 'left-1.5 right-1.5', containerPaddingClass: 'p-4' };
+  };
+
+  const sizes = getControlSizes();
+
   return (
     <div ref={containerRef} className={`relative bg-black w-full h-full ${className}`} onMouseMove={handleMouseMove} onClick={handlePlayerClick}>
       <video ref={videoRef} className="w-full h-full object-contain" playsInline controls={false} />
@@ -621,7 +601,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent ${sizes.containerPaddingClass} flex flex-col`} style={{ maxHeight: isMobile ? '35%' : '30%' }}>
             <div className="mb-2 md:mb-3 flex-shrink-0">
               <div ref={progressRef} className="relative h-2 py-2 -my-2 bg-transparent cursor-pointer group" onClick={handleProgressClick} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-                <div className={`absolute ${sizes.progressInsetClass} top-1/2 -translate-y-1/2 ${sizes.progressBarClass} bg-white/30 rounded-full overflow-hidden`}> <div className="absolute top-0 left-0 h-full bg-white/50 rounded-full transition-all duration-200" style={{ width: Number.isFinite(playerState.duration) && playerState.duration > 0 ? `${(playerState.buffered / playerState.duration) * 100}%` : '0%' }}/> <div className="absolute top-0 left-0 h-full bg-red-600 rounded-full" style={{ width: `${currentTimePercentage}%` }}/> </div>
+                <div className={`absolute ${sizes.progressInsetClass} top-1/2 -translate-y-1/2 ${sizes.progressBarClass} bg-white/30 rounded-full overflow-hidden`}> <div className="absolute top-0 left-0 h-full bg-white/50 rounded-full transition-all duration-200" style={{ width: isFinite(playerState.duration) && playerState.duration > 0 ? `${(playerState.buffered / playerState.duration) * 100}%` : '0%' }}/> <div className="absolute top-0 left-0 h-full bg-red-600 rounded-full" style={{ width: `${currentTimePercentage}%` }}/> </div>
                 <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 ${sizes.progressThumbClass} rounded-full bg-red-600 shadow-md transition-all duration-150 ease-out group-hover:scale-150`} style={{ left: `${currentTimePercentage}%` }} onMouseDown={handleDragStart} onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart}/>
               </div>
             </div>
@@ -631,7 +611,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-wrap`}>
                   <div className="flex items-center gap-2 flex-shrink-0"> <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className={`text-white hover:text-accent transition-colors ${sizes.paddingClass}`} data-testid="button-volume"> {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />} </button> <input type="range" min="0" max="100" value={volume} onChange={(e) => handleVolumeChange(Number(e.target.value))} className="w-20 flex-shrink-0 volume-slider-horizontal accent-red-600" data-testid="slider-volume" onClick={(e) => e.stopPropagation()} /> </div>
                   
-                  {/* TIME DISPLAY: Uses Relative Time to fix Infinity/Epoch issues */}
+                  {/* Display Time using Relative Values */}
                   <div className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-2 font-medium`} data-testid="text-time"> 
                     {playerState.isLive ? ( 
                         <span className="flex items-center gap-2"> <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"/> LIVE </span> 
@@ -650,6 +630,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-nowrap justify-between`}>
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}> 
                     <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className={`text-white hover:text-accent transition-colors ${sizes.paddingClass} flex-shrink-0`} data-testid="button-volume-mobile"> {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : <Volume2 size={sizes.iconSmall} />} </button> 
+                    {/* Mobile Time Display */}
                     <div className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-1 font-medium`} data-testid="text-time-mobile"> 
                         {playerState.isLive ? ( <span className="flex items-center gap-1.5 text-red-500 font-bold"> <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"/> LIVE </span> ) : ( <>{formatTime(relativeCurrent)} / {formatTime(relativeDur)}</> )} 
                     </div> 
@@ -663,7 +644,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Settings Menu Desktop */}
+      {/* Settings Menus (Desktop & Mobile) */}
       {playerState.showSettings && !isMobile && !playerState.error && (
         <>
           <div className="absolute inset-0 bg-black/40 z-40" onClick={handleSettingsToggle} />
