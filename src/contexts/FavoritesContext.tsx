@@ -1,7 +1,17 @@
 // /src/contexts/FavoritesContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { FavoriteChannel } from '@/types';
 import { toast } from "@/components/ui/sonner";
+
+// ✅ NEW: Favorite type WITHOUT streamUrl for security
+interface FavoriteChannel {
+  id: string;
+  name: string;
+  logoUrl: string;
+  categoryId: string;
+  categoryName: string;
+  addedAt: number;
+  // ❌ NO streamUrl stored
+}
 
 interface FavoritesContextType {
   favorites: FavoriteChannel[];
@@ -32,7 +42,17 @@ export const FavoritesProvider: React.FC<FavoritesProviderProps> = ({ children }
     const saved = localStorage.getItem('iptv-favorites');
     if (saved) {
       try {
-        setFavorites(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        // ✅ Clean legacy data that might have streamUrl
+        const cleaned = parsed.map((fav: any) => ({
+          id: fav.id,
+          name: fav.name,
+          logoUrl: fav.logoUrl,
+          categoryId: fav.categoryId || '',
+          categoryName: fav.categoryName,
+          addedAt: fav.addedAt
+        }));
+        setFavorites(cleaned);
       } catch (error) {
         console.error('Error loading favorites:', error);
       }
@@ -45,10 +65,16 @@ export const FavoritesProvider: React.FC<FavoritesProviderProps> = ({ children }
   }, [favorites]);
 
   const addFavorite = (channel: Omit<FavoriteChannel, 'addedAt'>) => {
+    // ✅ Only store safe data (NO streamUrl)
     const newFavorite: FavoriteChannel = {
-      ...channel,
+      id: channel.id,
+      name: channel.name,
+      logoUrl: channel.logoUrl,
+      categoryId: channel.categoryId || '',
+      categoryName: channel.categoryName,
       addedAt: Date.now(),
     };
+    
     setFavorites(prev => [...prev.filter(fav => fav.id !== channel.id), newFavorite]);
     
     toast.success("Added to favorites", {
