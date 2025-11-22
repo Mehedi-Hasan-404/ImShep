@@ -57,6 +57,7 @@ const Favorites = () => {
         )}
       </div>
 
+      {/* ✅ Convert favorites to PublicChannel format for ChannelCard */}
       <div className="channels-grid-4">
         {favorites
           .sort((a, b) => b.addedAt - a.addedAt)
@@ -64,8 +65,12 @@ const Favorites = () => {
             <ChannelCard 
               key={channel.id} 
               channel={{
-                ...channel,
-                categoryId: ''
+                id: channel.id,
+                name: channel.name,
+                logoUrl: channel.logoUrl,
+                categoryId: channel.categoryId,
+                categoryName: channel.categoryName,
+                streamUrl: '', // ✅ Empty - not needed for navigation
               }} 
             />
           ))}
