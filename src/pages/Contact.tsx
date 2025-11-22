@@ -129,7 +129,7 @@ const Contact = () => {
           
           {/* General Contact Card */}
           <div className="sm:col-span-2 lg:col-span-1 animate-fade-in" style={{ animationDelay: '600ms' }}>
-            <a href="mailto:support@example.com" className="block h-full group">
+            <a href="https://t.me/livetvprochat" className="block h-full group">
               <div className="bg-card border border-border rounded-xl p-6 h-full hover:border-accent transition-all duration-300 hover:-translate-y-1 hover:shadow-lg relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-gray-500 to-gray-700 opacity-5 rounded-bl-full transition-opacity group-hover:opacity-10" />
                 <div className="relative z-10">
