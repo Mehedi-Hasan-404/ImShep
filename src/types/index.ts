@@ -13,6 +13,7 @@ export interface Category {
   order?: number;
 }
 
+// ✅ Channel type used throughout the app
 export interface PublicChannel {
   id: string;
   name: string;
@@ -22,6 +23,7 @@ export interface PublicChannel {
   categoryName: string;
 }
 
+// ✅ Admin channel type (includes auth cookie)
 export interface AdminChannel {
   id: string;
   name: string;
@@ -32,25 +34,29 @@ export interface AdminChannel {
   authCookie?: string;
 }
 
+// ✅ UPDATED: Favorite WITHOUT streamUrl (only stores reference data)
 export interface FavoriteChannel {
   id: string;
   name: string;
   logoUrl: string;
-  streamUrl: string;
+  categoryId: string;
   categoryName: string;
   addedAt: number;
+  // ❌ NO streamUrl - only page reference data
 }
 
+// ✅ UPDATED: Recent WITHOUT streamUrl (only stores reference data)
 export interface RecentChannel {
   id: string;
   name: string;
   logoUrl: string;
-  streamUrl: string;
+  categoryId: string;
   categoryName: string;
   watchedAt: number;
+  // ❌ NO streamUrl - only page reference data
 }
 
-// --- UPDATED TYPES FOR LIVE EVENTS ---
+// --- LIVE EVENTS (unchanged) ---
 export interface LiveEventLink {
   label: string;
   url: string;
@@ -58,14 +64,14 @@ export interface LiveEventLink {
 
 export interface LiveEvent {
   id: string;
-  category: string; // e.g., "Cricket", "Football"
-  league: string;   // e.g., "Bangladesh Premier League"
+  category: string;
+  league: string;
   team1Name: string;
   team1Logo: string;
   team2Name: string;
   team2Logo: string;
-  startTime: string; // ISO string date
-  endTime?: string;  // Optional ISO string date for when match ends
-  isLive: boolean;   // Force live status
+  startTime: string;
+  endTime?: string;
+  isLive: boolean;
   links: LiveEventLink[];
 }
