@@ -1,4 +1,3 @@
-// src/components/VideoPlayer.tsx
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Play, Pause, VolumeX, Volume2, Maximize, Minimize, Loader2, AlertCircle, RotateCcw, Settings, PictureInPicture2, Subtitles, Rewind, FastForward, ChevronRight, Volume1, Music, Check, ArrowLeft, Share2 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -82,7 +81,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     showControls: true,
     currentTime: 0,
     duration: 0,
-    startTime: 0, // Added to handle absolute timestamp offsets
+    startTime: 0,
     buffered: 0,
     showSettings: false,
     currentQuality: -1, 
@@ -97,34 +96,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isLive: false,
   });
 
-  // Helper to calculate accurate time stats (Start, Current, Duration, Live Status)
   const getTimeStats = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return { currentTime: 0, duration: 0, startTime: 0, isLive: false };
 
     let currentTime = video.currentTime;
     let duration = video.duration;
     let startTime = 0;
-    
-    // Initial Live check based on Infinity duration
     let isLive = !isFinite(duration);
 
-    // Strategy 1: Shaka Player Seek Range
     if (playerTypeRef.current === 'shaka' && shakaPlayerRef.current) {
       try {
         const range = shakaPlayerRef.current.seekRange();
         if (range) {
           startTime = range.start;
-          // If we have a finite end > 0, use it as duration (absolute end time)
           if (isFinite(range.end) && range.end > 0) {
             duration = range.end;
-            // If we have a fixed range, it's likely VOD (or seekable live treated as VOD for UI)
             isLive = false; 
           }
         }
       } catch (e) { /* ignore */ }
-    } 
-    // Strategy 2: Native Seekable Range
-    else if (video.seekable && video.seekable.length > 0) {
+    } else if (video.seekable && video.seekable.length > 0) {
       try {
         startTime = video.seekable.start(0);
         const end = video.seekable.end(video.seekable.length - 1);
@@ -135,7 +126,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } catch (e) { /* ignore */ }
     }
 
-    // Sanity check: prevent negative start times or NaNs
     if (!isFinite(startTime) || startTime < 0) startTime = 0;
     if (!isFinite(duration) || isNaN(duration)) duration = 0;
 
@@ -233,15 +223,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current = hls;
         
         let retryCount = 0; const maxRetries = 3;
+        let mediaRecoveryAttempts = 0; 
+
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!isMountedRef.current) return;
           if (data.fatal) {
             if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+            
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                if (retryCount < maxRetries) { retryCount++; setTimeout(() => { hls.startLoad(); }, 1000 * retryCount); } 
-                else { setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Network error: Unable to load stream', showControls: false })); if (onError) onError(); destroyPlayer(); }
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); }
-            else { setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Playback error occurred', showControls: false })); if (onError) onError(); destroyPlayer(); }
+                if (retryCount < maxRetries) { 
+                    retryCount++; 
+                    console.log(`HLS Network Error, retrying (${retryCount}/${maxRetries})...`);
+                    setTimeout(() => { hls.startLoad(); }, 1000 * retryCount); 
+                } else { 
+                    setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Network error: Unable to load stream', showControls: false })); 
+                    if (onError) onError(); 
+                    destroyPlayer(); 
+                }
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                if (mediaRecoveryAttempts < 2) {
+                    mediaRecoveryAttempts++;
+                    console.log(`HLS Media Error, recovering (${mediaRecoveryAttempts}/2)...`);
+                    hls.recoverMediaError();
+                } else {
+                    setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Media error: Unable to play stream', showControls: false }));
+                    if (onError) onError();
+                    destroyPlayer();
+                }
+            } else { 
+                setPlayerState(prev => ({ ...prev, isLoading: false, error: 'Playback error occurred', showControls: false })); 
+                if (onError) onError(); 
+                destroyPlayer(); 
+            }
           }
         });
         
@@ -293,12 +306,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
         const errorCode = event.detail.code;
         let errorMessage = `Stream error occurred`;
-        if (errorCode >= 6000 && errorCode < 7000) errorMessage = 'Network error - retrying...';
+        if (errorCode >= 6000 && errorCode < 7000) errorMessage = 'Network error: Unable to load stream';
         else if (errorCode >= 4000 && errorCode < 5000) errorMessage = 'Manifest parse failed';
         else if (errorCode >= 1000 && errorCode < 2000) errorMessage = 'DRM error';
         else if (errorCode === 1003) errorMessage = 'No playable streams';
+        
         setPlayerState(prev => ({ ...prev, isLoading: false, error: errorMessage, showControls: false }));
-        if (errorCode >= 6000 && errorCode < 7000) { setTimeout(() => handleRetry(), 2000); } else { if (onError) onError(); }
+        
+        // Only retry internally if needed, but here we let Shaka fail after its own retries
+        if (onError) onError();
         destroyPlayer();
       };
       
@@ -349,7 +365,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => { video.removeEventListener('loadedmetadata', onLoadedMetadata); video.removeEventListener('error', onErrorHandler); };
   };
 
-  // --- Updated Time Formatting to Handle Relative Time ---
   const formatTime = (time: number): string => {
     if (!isFinite(time) || time < 0) return "0:00";
     const hours = Math.floor(time / 3600);
@@ -448,15 +463,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleSheetTouchMove = (e: React.TouchEvent) => { if (touchStartYRef.current === null) return; const currentY = e.touches[0].clientY; const deltaY = currentY - touchStartYRef.current; if (deltaY > 0) { setSheetDragY(deltaY); } };
   const handleSheetTouchEnd = () => { if (sheetDragY > 100) { setPlayerState(prev => ({ ...prev, showSettings: false })); setExpandedSettingItem(null); } setSheetDragY(0); touchStartYRef.current = null; };
 
-  // --- Updated Seek Calculations to Respect Start Time ---
-
   const calculateNewTime = useCallback((clientX: number): number | null => {
     const video = videoRef.current; const progressBar = progressRef.current; 
     if (!video || !progressBar || !isFinite(playerState.duration) || playerState.duration <= 0 || playerState.isLive) return null; 
     const rect = progressBar.getBoundingClientRect(); 
     const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width)); 
     const percentage = clickX / rect.width; 
-    // Calculate new time relative to the duration window (End - Start) + Start
     const relativeDuration = playerState.duration - playerState.startTime;
     return (percentage * relativeDuration) + playerState.startTime;
   }, [playerState.isLive, playerState.duration, playerState.startTime]);
@@ -479,7 +491,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const rect = progressRef.current?.getBoundingClientRect();
     if (!rect) return;
     const touch = e.touches[0];
-    // Calculate initial seek time respecting offset
     const relativeDuration = playerState.duration - playerState.startTime;
     const clickX = touch.clientX - rect.left;
     const percentage = clickX / rect.width;
@@ -518,7 +529,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const liveEdge = shakaPlayerRef.current.getPlayheadTimeAsDate();
       if (liveEdge) { const newTime = new Date(liveEdge.getTime() - 10000); shakaPlayerRef.current.seek(newTime); }
     } else { 
-        // Respect startTime boundary
         video.currentTime = Math.max(playerState.startTime, video.currentTime - 10); 
     }
     setPlayerState(prev => ({ ...prev, showControls: true })); lastActivityRef.current = Date.now();
@@ -530,7 +540,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const liveEdge = shakaPlayerRef.current.getPlayheadTimeAsDate(); const currentTime = shakaPlayerRef.current.getPlayheadTimeAsDate();
       if (liveEdge && currentTime) { const newTime = new Date(Math.min(liveEdge.getTime(), currentTime.getTime() + 10000)); shakaPlayerRef.current.seek(newTime); }
     } else { 
-        // Respect duration boundary
         video.currentTime = Math.min(playerState.duration, video.currentTime + 10); 
     }
     setPlayerState(prev => ({ ...prev, showControls: true })); lastActivityRef.current = Date.now();
@@ -550,7 +559,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => { const handleGlobalMouseMove = (e: MouseEvent) => { if (dragStartRef.current?.isDragging) handleDragMove(e); }; const handleGlobalMouseUp = () => { if (dragStartRef.current?.isDragging) handleDragEnd(); }; document.addEventListener('mousemove', handleGlobalMouseMove); document.addEventListener('mouseup', handleGlobalMouseUp); return () => { document.removeEventListener('mousemove', handleGlobalMouseMove); document.removeEventListener('mouseup', handleGlobalMouseUp); }; }, [handleDragMove, handleDragEnd]);
   useEffect(() => { const handleGlobalTouchEnd = () => { if (touchStartRef.current) handleTouchEnd(); }; document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false }); return () => document.removeEventListener('touchend', handleGlobalTouchEnd); }, [handleTouchEnd]);
 
-  // --- Relative Time Calculation for UI ---
   const getRelativeTime = () => {
       return Math.max(0, playerState.currentTime - playerState.startTime);
   };
@@ -559,7 +567,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return Math.max(0, playerState.duration - playerState.startTime);
   };
 
-  // Calculate percentage based on relative values
   const relativeCurrent = getRelativeTime();
   const relativeDur = getRelativeDuration();
   
@@ -614,7 +621,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />}
                     </button>
                     
-                    {/* Volume Slider with Fill Effect */}
                     <div className="w-24 h-full flex items-center group/volume">
                       <input
                         type="range"
@@ -632,7 +638,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </div>
                   
-                  {/* Display Time using Relative Values */}
                   <div className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-2 font-medium`} data-testid="text-time"> 
                     {playerState.isLive ? ( 
                         <span className="flex items-center gap-2"> <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"/> LIVE </span> 
@@ -651,7 +656,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-nowrap justify-between`}>
                   <div className={`flex items-center ${sizes.gapClass} flex-shrink-0`}> 
                     <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className={`text-white hover:text-accent transition-colors ${sizes.paddingClass} flex-shrink-0`} data-testid="button-volume-mobile"> {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : <Volume2 size={sizes.iconSmall} />} </button> 
-                    {/* Mobile Time Display */}
                     <div className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-1 font-medium`} data-testid="text-time-mobile"> 
                         {playerState.isLive ? ( <span className="flex items-center gap-1.5 text-red-500 font-bold"> <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"/> LIVE </span> ) : ( <>{formatTime(relativeCurrent)} / {formatTime(relativeDur)}</> )} 
                     </div> 
@@ -665,7 +669,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Settings Menus (Desktop & Mobile) */}
       {playerState.showSettings && !isMobile && !playerState.error && (
         <>
           <div className="absolute inset-0 bg-black/40 z-40" onClick={handleSettingsToggle} />
@@ -693,7 +696,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </>
       )}
       
-      {/* Mobile Settings Sheet */}
       {playerState.showSettings && isMobile && !playerState.error && (
         <>
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" style={{ backgroundColor: 'rgba(15, 15, 15, 0.92)' }} onClick={handleSettingsToggle} />
