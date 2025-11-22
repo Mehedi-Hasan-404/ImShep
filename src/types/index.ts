@@ -65,6 +65,7 @@ export interface LiveEvent {
   team2Name: string;
   team2Logo: string;
   startTime: string; // ISO string date
+  endTime?: string;  // Optional ISO string date for when match ends
   isLive: boolean;   // Force live status
   links: LiveEventLink[];
 }
