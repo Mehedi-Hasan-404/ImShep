@@ -609,7 +609,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <div className={`flex items-center ${sizes.gapClass} flex-nowrap flex-1 min-h-[40px]`}>
               {!isMobile && (
                 <div className={`flex items-center ${sizes.gapClass} flex-1 min-w-0 flex-wrap`}>
-                  <div className="flex items-center gap-2 flex-shrink-0"> <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className={`text-white hover:text-accent transition-colors ${sizes.paddingClass}`} data-testid="button-volume"> {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />} </button> <input type="range" min="0" max="100" value={volume} onChange={(e) => handleVolumeChange(Number(e.target.value))} className="w-20 flex-shrink-0 volume-slider-horizontal accent-red-600" data-testid="slider-volume" onClick={(e) => e.stopPropagation()} /> </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className={`text-white hover:text-accent transition-colors ${sizes.paddingClass}`} data-testid="button-volume">
+                      {playerState.isMuted ? <VolumeX size={sizes.iconSmall} /> : volume > 50 ? <Volume2 size={sizes.iconSmall} /> : <Volume1 size={sizes.iconSmall} />}
+                    </button>
+                    
+                    {/* Volume Slider with Fill Effect */}
+                    <div className="w-24 h-full flex items-center group/volume">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={volume}
+                        onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                        className="w-full h-1 bg-white/30 rounded-lg appearance-none cursor-pointer volume-slider-horizontal"
+                        style={{
+                          background: `linear-gradient(to right, #ef4444 ${volume}%, rgba(255, 255, 255, 0.3) ${volume}%)`
+                        }}
+                        data-testid="slider-volume"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
                   
                   {/* Display Time using Relative Values */}
                   <div className={`text-white ${sizes.textClass} whitespace-nowrap flex-shrink-0 mx-2 font-medium`} data-testid="text-time"> 
