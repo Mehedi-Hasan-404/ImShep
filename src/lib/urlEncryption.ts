@@ -1,4 +1,5 @@
-// src/lib/urlEncryption.ts - FIXED VERSION
+// src/lib/urlEncryption.ts
+
 const PROXY_URL = '/api/m3u8-proxy';
 
 /**
@@ -21,7 +22,13 @@ function needsProxying(url: string): boolean {
       return false;
     }
   } catch (e) {
-    // Invalid URL, treat as needing proxy if it looks like a path
+    // Invalid URL
+  }
+
+  // ✅ FIX: Explicitly BYPASS proxy for MPD (DASH) and MP4
+  // These formats work best directly and don't use the M3U8 rewriter
+  if (urlLower.includes('.mpd') || urlLower.includes('.mp4')) {
+    return false; 
   }
 
   // CRITICAL: Assume ALL external http/https URLs need proxying
@@ -64,7 +71,6 @@ export function getProxiedUrl(originalUrl: string): string {
     }
   }
   
-  // CRITICAL FIX: Always proxy streams for manual channels
   // The needsProxying check ensures we only proxy the right content
   if (needsProxying(originalUrl)) {
     const proxiedUrl = `${PROXY_URL}?url=${encodeURIComponent(originalUrl)}`;
@@ -75,7 +81,7 @@ export function getProxiedUrl(originalUrl: string): string {
     return proxiedUrl;
   }
   
-  // Return original URL for direct streams (MP4, etc.)
+  // Return original URL for direct streams (MP4, MPD, etc.)
   console.log('Stream does not need proxying, using direct URL');
   return originalUrl;
 }
