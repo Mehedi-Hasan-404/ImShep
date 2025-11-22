@@ -10,12 +10,13 @@ import { RecentsProvider } from "@/contexts/RecentsContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import Layout from "@/components/Layout";
 import { Analytics } from "@vercel/analytics/react";
+import { AdblockDetector } from "@/components/AdblockDetector"; // Import the new component
 
 // Lazy Load Pages
 const Home = lazy(() => import("@/pages/Home"));
 const Favorites = lazy(() => import("@/pages/Favorites"));
 const Live = lazy(() => import("@/pages/Live"));
-const EventPlayer = lazy(() => import("@/pages/EventPlayer")); // Import EventPlayer
+const EventPlayer = lazy(() => import("@/pages/EventPlayer"));
 const CategoryChannels = lazy(() => import("@/pages/CategoryChannels"));
 const ChannelPlayer = lazy(() => import("@/pages/ChannelPlayer"));
 const Admin = lazy(() => import("@/pages/Admin"));
@@ -36,6 +37,9 @@ const App = () => (
       <ThemeProvider defaultTheme="dark" storageKey="iptv-ui-theme">
         <Toaster />
         <Sonner />
+        {/* The Detector runs globally. If blocked, it covers the entire app. */}
+        <AdblockDetector />
+        
         <Router>
           <FavoritesProvider>
             <RecentsProvider>
@@ -47,7 +51,6 @@ const App = () => (
                   <Route path="/live">
                     <Layout><Live /></Layout>
                   </Route>
-                  {/* New Route for Live Event Player */}
                   <Route path="/live/:eventId">
                     {(params: { eventId: string } | undefined) => 
                       <Layout><EventPlayer /></Layout>
